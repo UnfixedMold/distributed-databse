@@ -1,0 +1,29 @@
+{
+  "name": "VU-DistSys",
+  "build": {
+    "dockerfile": "Dockerfile",
+    "context": "."
+  },
+  "runArgs": ["--hostname", "dist-sys.mif"],
+
+  "customizations": {
+    "vscode": {
+      "settings": {
+        "terminal.integrated.shell.linux": "/bin/bash"
+      },
+      "extensions": [
+        "lexical-lsp.lexical",
+        "erlang-language-platform.erlang-language-platform",
+        "nguyenngoclong.asdf"
+      ]
+    }
+  },
+
+  "forwardPorts": [7000],
+  "portsAttributes": {
+    "*": {
+      "onAutoForward": "ignore"
+    }
+  },
+  "remoteUser": "vscode"
+}
