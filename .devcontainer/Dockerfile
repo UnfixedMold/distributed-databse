@@ -36,9 +36,11 @@ RUN set -xe \
     && asdf plugin add elixir \
     && asdf plugin add rebar
 
+# Erlang 28 is not supported either by Elixir 1.18 or the Lexical,
+# thus keep Erlang 27 for now.
 RUN set -xe \
-    && asdf set erlang 28.0.2 \
-    && asdf set elixir 1.18.4-otp-28 \
+    && asdf set erlang 27.3.4.3 \
+    && asdf set elixir 1.18.4-otp-27 \
     && asdf set rebar  3.25.1
 
 RUN set -xe && asdf install erlang
