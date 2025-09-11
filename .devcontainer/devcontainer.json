@@ -14,7 +14,8 @@
       "extensions": [
         "lexical-lsp.lexical",
         "erlang-language-platform.erlang-language-platform",
-        "nguyenngoclong.asdf"
+        "nguyenngoclong.asdf",
+        "tlaplus.vscode-ide"
       ]
     }
   },

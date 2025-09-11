@@ -1,3 +1,4 @@
+# cspell:words devcontainers TLAPS adduser libncurses opam rebar tlapm fontconfig sandboxing
 FROM mcr.microsoft.com/vscode/devcontainers/base:ubuntu-24.04
 
 ##
@@ -28,7 +29,7 @@ ENV PATH="${HOME}/.asdf/shims:${PATH}"
 ENV LC_ALL="C.utf8"
 
 ##
-## Install the stuff.
+## Install the Erlang/Elixir and related tools.
 ##
 RUN set -xe \
     && asdf plugin add erlang \
@@ -43,3 +44,30 @@ RUN set -xe \
 RUN set -xe && asdf install erlang
 RUN set -xe && asdf install elixir && mix local.hex --force
 RUN set -xe && asdf install
+
+##
+## Install TLA+ and TLAPS.
+##
+
+USER root
+RUN set -xe \
+    && apt-get update \
+    && apt-get install -y opam zlib1g-dev gawk time pkg-config fontconfig openjdk-21-jdk \
+    && apt-get clean
+USER vscode
+
+RUN set -xe \
+    && opam init --disable-sandboxing --yes --shell-setup \
+    && opam switch create 5.3.0
+
+RUN set -xe \
+    && eval $(opam env --switch=5.3.0) \
+    && git clone https://github.com/tlaplus/tlapm /tmp/tlapm \
+    && cd /tmp/tlapm \
+    && make opam-update \
+    && make opam-deps \
+    && make opam-deps-opt \
+    && make \
+    && make install \
+    && cd $HOME \
+    && rm -rf /tmp/tlapm

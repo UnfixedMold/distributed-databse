@@ -1,0 +1,11 @@
+{
+  "tlaplus.tlaps.enabled": true,
+  "tlaplus.tlaps.lspServerCommand": [
+    "opam",
+    "exec",
+    "--",
+    "tlapm_lsp",
+    "--log-io",
+    "--log-to=/tmp/tlapm_lsp.log"
+  ]
+}
