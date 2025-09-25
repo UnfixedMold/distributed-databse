@@ -21,12 +21,16 @@ ENV PATH="${HOME}/bin:${PATH}"
 
 ##
 ## Setup the ASDF.
+## Use .tool-versions-devcontainer instead of .tool-versions to avoid
+## interference with files found in the original workspace.
 ##
 RUN set -xe \
     && wget https://github.com/asdf-vm/asdf/releases/download/v0.18.0/asdf-v0.18.0-linux-arm64.tar.gz -O bin/asdf.tar.gz \
     && (cd bin && tar -xzf asdf.tar.gz && rm asdf.tar.gz)
 ENV PATH="${HOME}/.asdf/shims:${PATH}"
 ENV LC_ALL="C.utf8"
+ENV ASDF_DEFAULT_TOOL_VERSIONS_FILENAME=".tool-versions-devcontainer"
+
 
 ##
 ## Install the Erlang/Elixir and related tools.
