@@ -21,3 +21,6 @@ vu_dist_sys_devcontainer-*.tar
 
 # Temporary files, for example, from tests.
 /tmp/
+
+# Reference files
+/ref/

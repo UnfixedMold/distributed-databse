@@ -1,10 +1,13 @@
 {
-  "name": "VU-DistSys",
+  "name": "dist-sys",
   "build": {
     "dockerfile": "Dockerfile",
     "context": "."
   },
   "runArgs": ["--hostname", "dist-sys.mif"],
+  "mounts": [
+    "source=${localEnv:HOME}${localEnv:USERPROFILE}/.ssh,target=/home/vscode/.ssh,readonly,type=bind,consistency=cached"
+  ],
 
   "customizations": {
     "vscode": {
