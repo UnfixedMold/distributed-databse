@@ -9,6 +9,7 @@ Currently implementing a basic distributed key-value store with:
 - **Broadcast replication**: Write operations are broadcast to all connected nodes
 - **Sync-on-startup**: New nodes sync from existing nodes when joining
 - **Automated distributed testing**: Using `LocalCluster` to spawn and test multi-node clusters
+- **TLA+ formal specification**: Models core protocol behavior (`DistributedDb.tla`)
 
 ## Architecture
 
@@ -54,10 +55,10 @@ iex --sname node3@localhost -S mix
 
 ### Connecting Nodes
 
-```elixir
-# In node2 or node3
-Node.connect(:"node1@localhost")
-Node.connect(:"node2@localhost")  # if on node3
+```elixir 
+# In node2 or node3 / not needed, because we use libcluster
+# Node.connect(:"node1@localhost")
+# Node.connect(:"node2@localhost")
 
 # Verify connections
 Node.list()
@@ -86,8 +87,20 @@ DistDb.Store.list_all()  # => %{...}
 mix test
 
 # Run specific test file
-mix test test/dist_db/store_test.exs
+mix test test/unit/local_store_test.exs
+mix test test/integration/dist_store_test.exs
 ```
 
 Distributed tests use `LocalCluster` to programmatically spawn multiple nodes and verify replication behavior.
+
+## Formal Specification
+
+TLA+ specification for verifying protocol correctness:
+
+```bash
+# Check the specification with TLC model checker
+tlc DistributedDb.tla -config DistributedDb.cfg
+```
+
+See [TLA_README.md](TLA_README.md) for detailed documentation on the formal specification.
 
