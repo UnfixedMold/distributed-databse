@@ -4,10 +4,15 @@ FROM mcr.microsoft.com/vscode/devcontainers/base:ubuntu-24.04
 ##
 ##  Install packages needed for the build.
 ##
-RUN set -xe \
+RUN set -eux \
     && apt-get update \
     && apt-get install -y git curl wget libssl-dev libncurses-dev autoconf g++ \
-    && apt-get clean
+    && curl -fsSL https://deb.nodesource.com/setup_current.x | bash - \
+    && apt-get install -y nodejs \
+    && corepack enable \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
 
 ##
 ##  Create a non-root user.

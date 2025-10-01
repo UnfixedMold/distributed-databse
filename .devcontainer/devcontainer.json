@@ -15,7 +15,9 @@
         "lexical-lsp.lexical",
         "erlang-language-platform.erlang-language-platform",
         "nguyenngoclong.asdf",
-        "tlaplus.vscode-ide"
+        "tlaplus.vscode-ide",
+        "anthropic.claude-code",
+        "ms-vscode.makefile-tools"
       ]
     }
   },
