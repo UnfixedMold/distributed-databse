@@ -1,6 +1,6 @@
 # Distributed Database
 
-A distributed key-value database system built with Elixir, inspired by etcd. This project is developed incrementally across three labs, progressively building toward a production-grade distributed system.
+A distributed key-value database system built with Elixir for distributed systems coursework at VU. This is an educational project developed incrementally across three labs to learn distributed systems concepts.
 
 ## Current Status: Lab-1 (Simple Distributed System)
 
@@ -8,7 +8,8 @@ Currently implementing a basic distributed key-value store with:
 - **Replicated storage**: Each node maintains its own copy of the data
 - **Broadcast replication**: Write operations are broadcast to all connected nodes
 - **Sync-on-startup**: New nodes sync from existing nodes when joining
-- **Automated distributed testing**: Using `LocalCluster` to spawn and test multi-node clusters
+- **Cluster management**: Using `libcluster` for automatic node discovery and connection
+- **Automated distributed testing**: Using `local_cluster` to spawn and test multi-node clusters programmatically
 - **TLA+ formal specification**: Models core protocol behavior (`DistributedDb.tla`)
 
 ## Architecture
@@ -55,13 +56,11 @@ iex --sname node3@localhost -S mix
 
 ### Connecting Nodes
 
-```elixir 
-# In node2 or node3 / not needed, because we use libcluster
-# Node.connect(:"node1@localhost")
-# Node.connect(:"node2@localhost")
+Nodes automatically discover and connect to each other using `libcluster`:
 
+```elixir
 # Verify connections
-Node.list()
+Node.list()  # Should show other nodes automatically
 ```
 
 ### Basic Operations
@@ -91,7 +90,7 @@ mix test test/unit/local_store_test.exs
 mix test test/integration/dist_store_test.exs
 ```
 
-Distributed tests use `LocalCluster` to programmatically spawn multiple nodes and verify replication behavior.
+Distributed tests use `local_cluster` to programmatically spawn multiple Elixir nodes in the same BEAM VM and verify replication behavior across them.
 
 ## Formal Specification
 
