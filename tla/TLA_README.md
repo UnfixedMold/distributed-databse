@@ -19,8 +19,6 @@
 
 ### Actions
 
-**Client Operations:**
-
 1. **Put(node, key, value)** - Client calls `put` on a node
    - Updates local: `store[node][key] := value`
    - Broadcasts to others: adds messages to channel for all peers
@@ -32,8 +30,6 @@
 3. **Get(node, key)** - Client reads from a node
    - Returns: `store[node][key]`
    - No state change (optional to model)
-
-**Replication (message delivery):**
 
 4. **LocalPut(msg)** - Node receives and applies `local_put`
    - Target applies: `store[target][key] := value`
