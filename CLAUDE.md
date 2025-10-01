@@ -11,15 +11,14 @@ This is a distributed key-value database system built with Elixir, inspired by e
 - **Lab-3 (Planned)**: Consensus-based replication with leader election (Raft)
 
 Each lab includes:
-- Elixir implementation (`lib/dist_db/`)
-- Automated distributed tests (`test/`)
-- TLA+ formal specification (`DistributedDb.tla`, `DistributedDb.cfg`)
+- Elixir implementation ([lib/dist_db/](lib/dist_db/))
+- Automated distributed tests ([test/](test/))
+- TLA+ formal specification ([tla/DistributedDb.tla](tla/DistributedDb.tla), [tla/DistributedDb.cfg](tla/DistributedDb.cfg))
 
 ## Development Environment
 
 This project uses a devcontainer based on Ubuntu 24.04 with:
-- **ASDF version manager**: Uses `.tool-versions-devcontainer` instead of `.tool-versions` to avoid interference with workspace files
-- **Erlang 27.3.4.3 / Elixir 1.18.4-otp-27**: Erlang 28 is not currently supported by Elixir 1.18 or Lexical LSP
+- **Erlang/Elixir**: Elixir 1.18 with OTP 27 (Erlang 28 not supported by Elixir 1.18 or Lexical LSP)
 - **TLA+ toolchain**: Includes TLAPM (TLA+ Proof Manager) built from source with OCaml 5.3.0
 - **Port 7000**: Forwarded for distributed node communication
 
@@ -52,18 +51,19 @@ iex -S mix
 ### TLA+ Specification
 ```bash
 # Check the specification with TLC model checker
+cd tla/
 tlc DistributedDb.tla -config DistributedDb.cfg
 
-# See TLA_README.md for detailed documentation
+# See tla/TLA_README.md for detailed documentation
 ```
 
 ### Devcontainer
 ```bash
-# Build the devcontainer image (from .devcontainer directory)
-make build
+# Build the devcontainer image
+cd .devcontainer && make build
 
 # Run the devcontainer
-make run
+cd .devcontainer && make run
 ```
 
 ## Architecture
@@ -73,8 +73,8 @@ make run
 **Core Concept:** Each node maintains its own complete copy of the data (replicated store). There is no shared storage or single source of truth.
 
 **Components:**
-- **DistDb.Store**: GenServer on each node holding an in-memory map of key-value pairs
-- **DistDb.Application**: Supervisor that starts Store on application boot
+- [DistDb.Store](lib/dist_db/store.ex) - GenServer on each node holding an in-memory map of key-value pairs
+- [DistDb.Application](lib/dist_db/application.ex) - Supervisor that starts Store and Cluster.Supervisor on application boot
 
 **Replication Strategy:**
 
@@ -117,15 +117,15 @@ Uses `LocalCluster` library to programmatically spawn multiple Elixir nodes in t
 This allows automated testing of distributed behavior without manual node setup.
 
 **Test Structure:**
-- `test/unit/local_store_test.exs` - Tests single-node operations on test runner
-- `test/unit/dist_store_test.exs` - Tests replication across LocalCluster nodes
-- `test/integration/dist_store_test.exs` - End-to-end distributed workflow tests
+- [test/unit/local_store_test.exs](test/unit/local_store_test.exs) - Tests single-node operations on test runner
+- [test/unit/dist_store_test.exs](test/unit/dist_store_test.exs) - Tests replication across LocalCluster nodes
+- [test/integration/dist_store_test.exs](test/integration/dist_store_test.exs) - End-to-end distributed workflow tests
 
 **Important:** Test runner node participates in the cluster! Cluster nodes automatically connect to the test runner and trigger `nodeup` events on its Store.
 
 ### Key Implementation Notes
 
-**Module naming:** The mix project is `:vu_dist_sys_devcontainer` for historical reasons, but the main application logic is under the `DistDb` namespace.
+**Module naming:** The mix project is `:dist_db` and the main application logic is under the `DistDb` namespace.
 
 **Operations:** Standard key-value store operations following etcd/Redis conventions:
 - `put(key, value)` - Upsert (create or update)
@@ -135,7 +135,7 @@ This allows automated testing of distributed behavior without manual node setup.
 
 ### TLA+ Formal Specification
 
-**Lab-1 Specification (`DistributedDb.tla`):**
+**Lab-1 Specification ([tla/DistributedDb.tla](tla/DistributedDb.tla)):**
 - Models broadcast replication protocol
 - Defines type invariants and basic properties
 - Intentionally simplified to match Lab-1's assumptions (reliable network, no failures)
@@ -145,4 +145,4 @@ This allows automated testing of distributed behavior without manual node setup.
 - **Lab-2**: Define properties formally, verify with TLC model checker
 - **Lab-3**: Prove at least one property using TLAPM
 
-See `TLA_README.md` for detailed documentation.
+See [tla/TLA_README.md](tla/TLA_README.md) for detailed documentation.
