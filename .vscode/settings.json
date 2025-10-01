@@ -7,5 +7,7 @@
     "tlapm_lsp",
     "--log-io",
     "--log-to=/tmp/tlapm_lsp.log"
-  ]
+  ],
+  "tlaplus.tlc.modelChecker.options": "-workers 1 -coverage 1",
+  "tlaplus.java.home": "/usr"
 }

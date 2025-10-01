@@ -10,7 +10,10 @@ This is a distributed key-value database system built with Elixir, inspired by e
 - **Lab-2 (Planned)**: Communication abstractions, distributed clocks, fault detection
 - **Lab-3 (Planned)**: Consensus-based replication with leader election (Raft)
 
-Optional TLA+ formal specification for verifying core behaviors.
+Each lab includes:
+- Elixir implementation (`lib/dist_db/`)
+- Automated distributed tests (`test/`)
+- TLA+ formal specification (`DistributedDb.tla`, `DistributedDb.cfg`)
 
 ## Development Environment
 
@@ -46,6 +49,14 @@ mix format
 iex -S mix
 ```
 
+### TLA+ Specification
+```bash
+# Check the specification with TLC model checker
+tlc DistributedDb.tla -config DistributedDb.cfg
+
+# See TLA_README.md for detailed documentation
+```
+
 ### Devcontainer
 ```bash
 # Build the devcontainer image (from .devcontainer directory)
@@ -73,7 +84,9 @@ make run
    - Fire-and-forget: no acknowledgments or retries (Lab-1 assumes reliable network)
 
 2. **Startup Synchronization:**
-   - When a new node joins, it syncs full state from any existing node
+   - Nodes subscribe to `:net_kernel.monitor_nodes(true)` to receive `{:nodeup, node}` events
+   - When a new node with empty state receives `nodeup`, it tries to sync from the connected node
+   - If RPC fails (timeout, node not ready), keeps empty state
    - If no other nodes exist, starts with empty state `%{}`
 
 3. **Read Operations (get/list_all):**
@@ -103,6 +116,13 @@ Uses `LocalCluster` library to programmatically spawn multiple Elixir nodes in t
 
 This allows automated testing of distributed behavior without manual node setup.
 
+**Test Structure:**
+- `test/unit/local_store_test.exs` - Tests single-node operations on test runner
+- `test/unit/dist_store_test.exs` - Tests replication across LocalCluster nodes
+- `test/integration/dist_store_test.exs` - End-to-end distributed workflow tests
+
+**Important:** Test runner node participates in the cluster! Cluster nodes automatically connect to the test runner and trigger `nodeup` events on its Store.
+
 ### Key Implementation Notes
 
 **Module naming:** The mix project is `:vu_dist_sys_devcontainer` for historical reasons, but the main application logic is under the `DistDb` namespace.
@@ -112,3 +132,17 @@ This allows automated testing of distributed behavior without manual node setup.
 - `get(key)` - Retrieve value
 - `delete(key)` - Remove key
 - `list_all()` - Get all key-value pairs (useful for sync/debugging)
+
+### TLA+ Formal Specification
+
+**Lab-1 Specification (`DistributedDb.tla`):**
+- Models broadcast replication protocol
+- Defines type invariants and basic properties
+- Intentionally simplified to match Lab-1's assumptions (reliable network, no failures)
+
+**Lab Requirements:**
+- **Lab-1**: Specify core behavior (DONE)
+- **Lab-2**: Define properties formally, verify with TLC model checker
+- **Lab-3**: Prove at least one property using TLAPM
+
+See `TLA_README.md` for detailed documentation.
