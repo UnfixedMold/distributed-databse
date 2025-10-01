@@ -1,156 +1,77 @@
-# TLA+ Formal Specification
+# TLA+ Formal Specification - Lab 1
 
-## Overview
-
-This directory contains the TLA+ formal specification for the distributed key-value store. The specification models the core behavior of the system across all three lab stages.
-
-### Lab-1: Basic Specification (Current)
-
-Models the **broadcast replication** protocol with intentional simplifications matching Lab-1's implementation.
+**Goal:** Design a formal specification for the broadcast replication protocol.
 
 ## What's Modeled
 
-### Core Operations
-- **Put(n, k, v)**: Node `n` writes key `k` with value `v`
-  - Updates local store immediately
-  - Broadcasts message to all other nodes
+### CONSTANTS
+- `Nodes` - Set of node identifiers (e.g., {n1, n2})
+- `Keys` - Set of possible keys (e.g., {k1, k2})
+- `Values` - Set of possible values (e.g., {v1, v2})
 
-- **Delete(n, k)**: Node `n` deletes key `k`
-  - Removes key locally (sets to Null)
-  - Broadcasts delete message
+### VARIABLES
+- `store[node][key]` - Per-node local key-value store
+- `messages` - Set of broadcast messages in-transit
 
-- **ReceivePut/ReceiveDelete**: Nodes receive and apply replicated operations
-  - Apply messages from other nodes
-  - Messages are consumed after processing
+### Init State
+- All nodes start with empty stores
+- No messages in channel
 
-### Assumptions (matching Lab-1 implementation)
-✅ **Reliable network** - messages don't get lost
-✅ **No node failures** - all nodes stay up
-✅ **Fire-and-forget** - no acknowledgments or retries
-✅ **Best-effort consistency** - eventual consistency only when all messages delivered
+### Actions
 
-### NOT Modeled (future labs)
-❌ Network partitions or message loss
-❌ Node crashes and recovery
-❌ Message reordering
-❌ Retry logic
-❌ Strong consistency guarantees
-❌ Vector clocks or causal ordering
+**Client Operations:**
 
-## Properties Checked
+1. **Put(node, key, value)** - Client calls `put` on a node
+   - Updates local: `store[node][key] := value`
+   - Broadcasts to others: adds messages to channel for all peers
 
-### Type Invariant (`TypeOK`)
-✅ **Always holds** - Verifies the state structure is correct
+2. **Delete(node, key)** - Client deletes from a node
+   - Updates local: `store[node][key] := NoValue`
+   - Broadcasts to others: adds messages to channel for all peers
 
-### Eventual Consistency (`EventualConsistency`)
-⚠️ **Conditionally holds** - All nodes converge when message queue is empty
-- In Lab-1: Only guaranteed if all messages are delivered
-- Future labs will strengthen this
+3. **Get(node, key)** - Client reads from a node
+   - Returns: `store[node][key]`
+   - No state change (optional to model)
 
-### Propagation Liveness (`PropagationLiveness`)
-❌ **NOT guaranteed in Lab-1** - A write may not propagate to all nodes
-- Requires retries (Lab-2)
-- Or consensus protocol (Lab-3)
+**Replication (message delivery):**
 
-## Running the Model Checker
+4. **LocalPut(msg)** - Node receives and applies `local_put`
+   - Target applies: `store[target][key] := value`
+   - Message removed from channel
 
-### Prerequisites
-```bash
-# TLA+ Toolbox is installed in the devcontainer
-# TLAPM (TLA+ Proof Manager) is also available
+5. **LocalDelete(msg)** - Node receives and applies `local_delete`
+   - Target applies: `store[target][key] := NoValue`
+   - Message removed from channel
+
+### Spec
+```tla
+Spec == Init /\ [][Next]_vars
 ```
 
-### Check the specification
+Where `Next` = Put | Delete | LocalPut | LocalDelete (Get optional).
+
+### TypeOK Invariant
+- `store` domain: `[Nodes -> [Keys -> Values \cup {NoValue}]]`
+- `messages` structure: {type, target, key, value}
+
+## Simplifications
+
+- All nodes start simultaneously with empty state
+- No node joining after startup
+- Reliable network (messages always delivered)
+- No crashes or recovery
+- Fire-and-forget (no acks/retries)
+
+## Running TLC
+
 ```bash
-# From project root
+cd tla/
 tlc DistributedDb.tla -config DistributedDb.cfg
 ```
 
-### Expected Results
-- ✅ `TypeOK` - should pass
-- ✅ `EventualConsistency` - passes in ideal conditions (no message loss)
-- ❌ `PropagationLiveness` - may fail (intentional - shows Lab-1 limitations)
+Expected: Explores states, TypeOK holds.
 
-## Model Parameters
+## Files
 
-### Current Configuration (small model)
-- **Nodes**: `{n1, n2, n3}` - 3 nodes
-- **Keys**: `{k1, k2}` - 2 keys
-- **Values**: `{v1, v2, Null}` - 2 values plus Null
-
-### State Space
-- Symmetry reduction on nodes reduces equivalent states
-- Message queue bounded to 10 messages (prevents infinite exploration)
-
-### Scaling Up
-To check larger models, edit `DistributedDb.cfg`:
-```
-Nodes = {n1, n2, n3, n4}
-Keys = {k1, k2, k3}
-Values = {v1, v2, v3, Null}
-```
-⚠️ State space grows exponentially!
-
-## Lab Progression
-
-### Lab-1: Specify Core Behavior (Current)
-**Requirement:** "Design a formal specification for its core behaviour"
-
-✅ **What we have:**
-- Basic protocol operations (Put, Delete, Replication)
-- State structure and transitions
-- Type invariant
-
-**Goal:** Describe HOW the system works
-
-### Lab-2: Define Properties Formally (Future)
-**Requirement:** "Update the formal specification and define properties formally"
-
-**What to add:**
-- Extend spec with vector clocks, retries, fault detectors
-- Write temporal logic properties (safety and liveness)
-- Run TLC model checker to verify properties
-
-**Goal:** State what properties the system SHOULD have and verify them
-
-### Lab-3: Prove Properties (Future)
-**Requirement:** "Define properties formally, and prove one of those properties"
-
-**What to add:**
-- Use TLAPM (TLA+ Proof Manager) to write mathematical proofs
-- Prove at least one property holds for ALL executions (not just model check)
-
-**Goal:** Mathematical proof, not just finite-state verification
-
----
-
-## Interpretation
-
-### What This Tells Us (Lab-1)
-
-1. **Lab-1 protocol is sound** under ideal conditions (TypeOK passes)
-2. **Eventual consistency requires** all messages to be delivered
-3. **No strong guarantees** without retries or consensus
-
-### Limitations We Accept (for now)
-
-This spec **intentionally does not model**:
-- Sync-on-startup behavior (nodeup handling)
-- RPC timeouts and failures
-- Network unreliability
-
-These will be addressed in future labs.
-
-## Relationship to Implementation
-
-| TLA+ Construct | Elixir Code |
-|----------------|-------------|
-| `Put(n, k, v)` | `DistDb.Store.put/2` |
-| `Delete(n, k)` | `DistDb.Store.delete/1` |
-| `ReceivePut` | `handle_call({:local_put, ...})` |
-| `messages` | Fire-and-forget RPC calls in `replicate_to_peers/2` |
-| `store[n]` | GenServer state (map) on each node |
-
----
-
-**Note**: This is a pedagogical specification for understanding Lab-1's behavior, not a complete verification. The TLA+ model helps us reason about what guarantees we DO and DON'T have.
+- `DistributedDb.tla` - The specification
+- `DistributedDb.cfg` - TLC configuration
