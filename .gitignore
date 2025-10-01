@@ -24,3 +24,6 @@ vu_dist_sys_devcontainer-*.tar
 
 # Reference files
 /ref/
+
+# tla output files
+/tla/*.out
