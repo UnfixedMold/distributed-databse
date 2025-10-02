@@ -1,5 +1,5 @@
 ---- MODULE DistributedDb ----
-EXTENDS Naturals, FiniteSets, TLC
+EXTENDS FiniteSets
 
 \* Lab-1: Broadcast replication for distributed KV store
 
