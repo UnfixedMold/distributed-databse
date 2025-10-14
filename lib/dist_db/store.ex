@@ -21,18 +21,10 @@ defmodule DistDb.Store do
   @doc """
   Puts a key-value pair into the store.
   Creates new entry or updates existing one.
-  Replicates to all connected nodes.
+  Broadcasts via URB to all connected nodes.
   """
   def put(key, value) do
     GenServer.call(__MODULE__, {:put, key, value})
-  end
-
-  @doc """
-  Internal function to apply a put operation locally without replication.
-  Used when receiving replicated operations from other nodes.
-  """
-  def local_put(key, value) do
-    GenServer.call(__MODULE__, {:local_put, key, value})
   end
 
   @doc """
@@ -46,18 +38,10 @@ defmodule DistDb.Store do
   @doc """
   Deletes a key from the store.
   Returns :ok whether key existed or not.
-  Replicates to all connected nodes.
+  Broadcasts via URB to all connected nodes.
   """
   def delete(key) do
     GenServer.call(__MODULE__, {:delete, key})
-  end
-
-  @doc """
-  Internal function to apply a delete operation locally without replication.
-  Used when receiving replicated operations from other nodes.
-  """
-  def local_delete(key) do
-    GenServer.call(__MODULE__, {:local_delete, key})
   end
 
   @doc """
@@ -74,31 +58,38 @@ defmodule DistDb.Store do
     GenServer.call(__MODULE__, :clear)
   end
 
+  @doc """
+  Deliver a put operation (called by Broadcast layer).
+  Applies put locally without triggering another broadcast.
+  """
+  def deliver_put(key, value) do
+    GenServer.call(__MODULE__, {:deliver_put, key, value})
+  end
+
+  @doc """
+  Deliver a delete operation (called by Broadcast layer).
+  Applies delete locally without triggering another broadcast.
+  """
+  def deliver_delete(key) do
+    GenServer.call(__MODULE__, {:deliver_delete, key})
+  end
+
   # Server Callbacks
 
   @impl true
   def init(:ok) do
     Logger.info("Starting DistDb.Store on node #{Node.self()}")
 
+    :net_kernel.monitor_nodes(true)
+
     {:ok, %{}}
   end
 
   @impl true
   def handle_call({:put, key, value}, _from, state) do
-    # Apply locally
-    new_state = Map.put(state, key, value)
-
-    # Replicate to all other nodes (fire-and-forget)
-    replicate_to_peers(:local_put, [key, value])
-
-    {:reply, :ok, new_state}
-  end
-
-  @impl true
-  def handle_call({:local_put, key, value}, _from, state) do
-    # Apply locally without further replication
-    new_state = Map.put(state, key, value)
-    {:reply, :ok, new_state}
+    # URB-broadcast the operation
+    DistDb.Broadcast.urb_broadcast(fn -> deliver_put(key, value) end)
+    {:reply, :ok, state}
   end
 
   @impl true
@@ -108,20 +99,9 @@ defmodule DistDb.Store do
 
   @impl true
   def handle_call({:delete, key}, _from, state) do
-    # Apply locally
-    new_state = Map.delete(state, key)
-
-    # Replicate to all other nodes (fire-and-forget)
-    replicate_to_peers(:local_delete, [key])
-
-    {:reply, :ok, new_state}
-  end
-
-  @impl true
-  def handle_call({:local_delete, key}, _from, state) do
-    # Apply locally without further replication
-    new_state = Map.delete(state, key)
-    {:reply, :ok, new_state}
+    # URB-broadcast the operation
+    DistDb.Broadcast.urb_broadcast(fn -> deliver_delete(key) end)
+    {:reply, :ok, state}
   end
 
   @impl true
@@ -132,6 +112,18 @@ defmodule DistDb.Store do
   @impl true
   def handle_call(:clear, _from, _state) do
     {:reply, :ok, %{}}
+  end
+
+  @impl true
+  def handle_call({:deliver_put, key, value}, _from, state) do
+    new_state = Map.put(state, key, value)
+    {:reply, :ok, new_state}
+  end
+
+  @impl true
+  def handle_call({:deliver_delete, key}, _from, state) do
+    new_state = Map.delete(state, key)
+    {:reply, :ok, new_state}
   end
 
   # When I'm empty and connect to a node, pull their state
@@ -161,29 +153,5 @@ defmodule DistDb.Store do
   @impl true
   def handle_info(_msg, state) do
     {:noreply, state}
-  end
-
-  # Private Helpers
-
-  defp replicate_to_peers(function, args) do
-    nodes = Node.list()
-
-    if nodes != [] do
-      Logger.debug("Replicating #{function} to nodes: #{inspect(nodes)}")
-
-      Enum.each(nodes, fn node ->
-        # Fire-and-forget: spawn async task to avoid blocking
-        Task.start(fn ->
-          try do
-            :rpc.call(node, __MODULE__, function, args)
-          rescue
-            e ->
-              Logger.warning(
-                "Failed to replicate #{function} to #{node}: #{inspect(e)}"
-              )
-          end
-        end)
-      end)
-    end
   end
 end
