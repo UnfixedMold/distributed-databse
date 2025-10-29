@@ -2,17 +2,16 @@
 FROM mcr.microsoft.com/vscode/devcontainers/base:ubuntu-24.04
 
 ##
-##  Install packages needed for the build.
+##  Install packages needed for the build + Claude / Codex requirements.
 ##
-RUN set -eux \
+RUN set -xe \
     && apt-get update \
-    && apt-get install -y git curl wget libssl-dev libncurses-dev autoconf g++ \
-    && curl -fsSL https://deb.nodesource.com/setup_current.x | bash - \
-    && apt-get install -y nodejs \
-    && corepack enable \
+    && apt-get install -y \
+    git curl wget libssl-dev libncurses-dev autoconf g++ \
+    nodejs npm \
+    && npm install -g @anthropic-ai/claude-code \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
-
 
 ##
 ##  Create a non-root user.

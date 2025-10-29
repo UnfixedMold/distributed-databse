@@ -4,11 +4,13 @@
     "dockerfile": "Dockerfile",
     "context": "."
   },
-  "runArgs": ["--hostname", "dist-sys.mif"],
+  "runArgs": [
+    "--hostname",
+    "dist-sys.mif"
+  ],
   "mounts": [
     "source=${localEnv:HOME}${localEnv:USERPROFILE}/.ssh,target=/home/vscode/.ssh,readonly,type=bind,consistency=cached"
   ],
-
   "customizations": {
     "vscode": {
       "settings": {
@@ -19,13 +21,13 @@
         "erlang-language-platform.erlang-language-platform",
         "nguyenngoclong.asdf",
         "tlaplus.vscode-ide",
-        "anthropic.claude-code",
         "ms-vscode.makefile-tools"
       ]
     }
   },
-
-  "forwardPorts": [7000],
+  "forwardPorts": [
+    7000
+  ],
   "portsAttributes": {
     "*": {
       "onAutoForward": "ignore"
