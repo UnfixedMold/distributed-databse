@@ -189,14 +189,8 @@ defmodule DistDb.Broadcast do
   end
 
   defp thresholds do
-    n = length(Node.list()) + 1
-    f = max(div(n - 1, 3), 0)
-
-    %{
-      echo: n - 2 * f,
-      ready: f + 1,
-      deliver: 2 * f + 1
-    }
+    (length(Node.list()) + 1)
+    |> DistDb.Broadcast.Thresholds.for_node_count()
   end
 
   defp get_message_state(state, msg) do

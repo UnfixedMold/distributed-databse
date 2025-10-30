@@ -6,6 +6,7 @@ defmodule DistDb.MixProject do
       app: :dist_db,
       version: "0.1.0",
       elixir: "~> 1.18",
+      elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
       deps: deps()
     ]
@@ -22,8 +23,12 @@ defmodule DistDb.MixProject do
   # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
-      {:local_cluster, "~> 2.0", only: :test},
+      {:local_cluster, "~> 2.0", only: [:dev, :test]},
       {:libcluster, "~> 3.4"}
     ]
   end
+
+  defp elixirc_paths(:dev), do: ["lib", "test/support"]
+  defp elixirc_paths(:test), do: ["lib", "test/support"]
+  defp elixirc_paths(_), do: ["lib"]
 end
