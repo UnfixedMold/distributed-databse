@@ -27,6 +27,7 @@ vu_dist_sys_devcontainer-*.tar
 
 # tla output files
 /tla/*.out
+/tla/states
 
 # claude settings
 .claude

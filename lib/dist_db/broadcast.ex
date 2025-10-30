@@ -199,7 +199,7 @@ defmodule DistDb.Broadcast do
         base_entry =
           current
           |> set_deliver_callback(msg.deliver)
-          |> new_message_state(msg)
+          |> init_message_state(msg)
 
         {base_entry, base_entry}
       end)
@@ -222,7 +222,7 @@ defmodule DistDb.Broadcast do
     end
   end
 
-  defp new_message_state(entry, msg) do
+  defp init_message_state(entry, msg) do
     entry = entry || %{}
     deliver = Map.get(entry, :deliver) || Map.get(msg, :deliver)
 
