@@ -2,35 +2,33 @@
 
 A distributed key-value database system built with Elixir for distributed systems coursework at VU. This is an educational project developed incrementally across three labs to learn distributed systems concepts.
 
-## Current Status: Lab-1 (Simple Distributed System)
+## Current Status: Lab-2 (Communication Abstractions)
 
-Currently implementing a basic distributed key-value store with:
-- **Replicated storage**: Each node maintains its own copy of the data
-- **Broadcast replication**: Write operations are broadcast to all connected nodes
-- **Sync-on-startup**: New nodes sync from existing nodes when joining
-- **Cluster management**: Using `libcluster` for automatic node discovery and connection
-- **Automated distributed testing**: Using `local_cluster` to spawn and test multi-node clusters programmatically
-- **TLA+ formal specification**: Models core protocol behavior (`DistributedDb.tla`)
+Lab-2 introduces Bracha Reliable Broadcast (RBC), which gives the store Byzantine fault tolerance up to ⌊(n - 1) / 3⌋ malicious or crashed nodes:
+- **Replicated storage**: Each node maintains its own copy of the data.
+- **Bracha RBC replication**: Writes flow through SEND → ECHO → READY with quorum thresholds derived from the current cluster size.
+- **Sync-on-startup**: Empty nodes fetch the full state from any peer when joining.
+- **Cluster management**: `libcluster` keeps all nodes connected automatically.
+- **Automated distributed testing**: `local_cluster` spins up in-process BEAM nodes to exercise the protocol.
+- **TLA+ formal specification**: Models the broadcast layer (`DistributedDb.tla`).
 
 ## Architecture
 
-### Lab-1: Broadcast Replication (Current)
-Each node runs its own `DistDb.Store` GenServer with an in-memory map. When a write occurs:
-1. Node stores locally
-2. Broadcasts operation to all other nodes via `:rpc.call()`
-3. All nodes apply the same operation
+### Lab-1 Recap: Naive Broadcast
+The first lab wired the database API to a plain broadcast fan-out with no delivery guarantees or Byzantine resilience.
+
+### Lab-2: Communication Abstractions (Current)
+Lab-2 replaces the unreliable broadcast with Bracha RBC while keeping the same public API:
+1. A client issues `DistDb.Store.put/2` or `delete/1`.
+2. The store hands a delivery callback to `DistDb.Broadcast.broadcast/1`.
+3. Broadcast assigns a message id `{origin_node, monotonic_seq}` and enters the Bracha phases (SEND, ECHO, READY).
+4. Thresholds (`n - 2f`, `f + 1`, `2f + 1`) are calculated at runtime by `DistDb.Broadcast.Thresholds`.
+5. Once `READY` quorum is met, the delivery callback executes on every correct node and mutates its local store.
 
 **Characteristics:**
-- Simple peer-to-peer architecture (no leader)
-- Best-effort consistency (assumes reliable network)
-- New nodes sync full state from any existing node on startup
-
-### Lab-2: Communication Abstractions (Planned)
-Will add:
-- Acknowledgments and retry logic for failed writes
-- Vector/Lamport clocks for causality tracking
-- Fault detectors to identify dead nodes
-- Basic conflict resolution
+- Peer-to-peer: no distinguished leader or coordinator.
+- Byzantine resilience up to `f = ⌊(n - 1)/3⌋` faulty nodes.
+- New nodes still sync their entire key set from the first healthy peer they see.
 
 ### Lab-3: Consensus-Based Replication (Planned)
 Will implement:
@@ -172,11 +170,13 @@ DistDb.Store.list_all()  # => %{...}
 mix test
 
 # Run specific test file
-mix test test/unit/local_store_test.exs
+mix test test/unit/single_node_store_test.exs
+mix test test/unit/multi_node_store_test.exs
+mix test test/integration/broadcast_bracha_test.exs
 mix test test/integration/dist_store_test.exs
 ```
 
-Distributed tests use `local_cluster` to programmatically spawn multiple Elixir nodes in the same BEAM VM and verify replication behavior across them.
+Distributed tests use `local_cluster` to programmatically spawn multiple Elixir nodes in the same BEAM VM and verify replication behavior across them. Shared helpers live in `test/support/test_support.ex`.
 
 ## Formal Specification
 
