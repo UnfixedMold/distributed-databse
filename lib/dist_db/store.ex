@@ -21,7 +21,7 @@ defmodule DistDb.Store do
   @doc """
   Puts a key-value pair into the store.
   Creates new entry or updates existing one.
-  Broadcasts via URB to all connected nodes.
+  Broadcasts via Bracha RBC to all connected nodes.
   """
   def put(key, value) do
     GenServer.call(__MODULE__, {:put, key, value})
@@ -38,7 +38,7 @@ defmodule DistDb.Store do
   @doc """
   Deletes a key from the store.
   Returns :ok whether key existed or not.
-  Broadcasts via URB to all connected nodes.
+  Broadcasts via Bracha RBC to all connected nodes.
   """
   def delete(key) do
     GenServer.call(__MODULE__, {:delete, key})
@@ -87,8 +87,8 @@ defmodule DistDb.Store do
 
   @impl true
   def handle_call({:put, key, value}, _from, state) do
-    # URB-broadcast the operation
-    DistDb.Broadcast.urb_broadcast(fn -> deliver_put(key, value) end)
+    # Broadcast the operation
+    DistDb.Broadcast.broadcast(fn -> deliver_put(key, value) end)
     {:reply, :ok, state}
   end
 
@@ -99,8 +99,8 @@ defmodule DistDb.Store do
 
   @impl true
   def handle_call({:delete, key}, _from, state) do
-    # URB-broadcast the operation
-    DistDb.Broadcast.urb_broadcast(fn -> deliver_delete(key) end)
+    # Broadcast the operation
+    DistDb.Broadcast.broadcast(fn -> deliver_delete(key) end)
     {:reply, :ok, state}
   end
 
