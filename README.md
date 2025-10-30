@@ -2,40 +2,18 @@
 
 A distributed key-value database system built with Elixir for distributed systems coursework at VU. This is an educational project developed incrementally across three labs to learn distributed systems concepts.
 
-## Current Status: Lab-2 (Communication Abstractions)
+## Lab Progress
 
-Lab-2 introduces Bracha Reliable Broadcast (RBC), which gives the store Byzantine fault tolerance up to ⌊(n - 1) / 3⌋ malicious or crashed nodes:
-- **Replicated storage**: Each node maintains its own copy of the data.
-- **Bracha RBC replication**: Writes flow through SEND → ECHO → READY with quorum thresholds derived from the current cluster size.
-- **Sync-on-startup**: Empty nodes fetch the full state from any peer when joining.
-- **Cluster management**: `libcluster` keeps all nodes connected automatically.
-- **Automated distributed testing**: `local_cluster` spins up in-process BEAM nodes to exercise the protocol.
-- **TLA+ formal specification**: Models the broadcast layer (`DistributedDb.tla`).
+### Lab-1 Recap: Naive Broadcast (completed)
+The first lab wired the database API to a plain broadcast fan-out with no delivery guarantees
 
-## Architecture
+### Lab-2: Communication Abstractions (current)
+Lab-2 swaps the naive fan-out for Bracha Reliable Broadcast (RBC), delivering Byzantine tolerance up to ⌊(n - 1) / 3⌋ faulty nodes while keeping the same client API. Messages progress through SEND/ECHO/READY phases with thresholds computed from the live cluster, and once READY quorum is met each node applies the write locally.
 
-### Lab-1 Recap: Naive Broadcast
-The first lab wired the database API to a plain broadcast fan-out with no delivery guarantees or Byzantine resilience.
-
-### Lab-2: Communication Abstractions (Current)
-Lab-2 replaces the unreliable broadcast with Bracha RBC while keeping the same public API:
-1. A client issues `DistDb.Store.put/2` or `delete/1`.
-2. The store hands a delivery callback to `DistDb.Broadcast.broadcast/1`.
-3. Broadcast assigns a message id `{origin_node, monotonic_seq}` and enters the Bracha phases (SEND, ECHO, READY).
-4. Thresholds (`n - 2f`, `f + 1`, `2f + 1`) are calculated at runtime by `DistDb.Broadcast.Thresholds`.
-5. Once `READY` quorum is met, the delivery callback executes on every correct node and mutates its local store.
-
-**Characteristics:**
-- Peer-to-peer: no distinguished leader or coordinator.
-- Byzantine resilience up to `f = ⌊(n - 1)/3⌋` faulty nodes.
-- New nodes still sync their entire key set from the first healthy peer they see.
-
-### Lab-3: Consensus-Based Replication (Planned)
+### Lab-3: Consensus-Based Replication (planned)
 Will implement:
-- Leader election using Raft algorithm
-- Log-based replication with majority consensus
-- Strong consistency guarantees
-- Proper recovery and catch-up for failed nodes
+- Leader election using Raft or other algorithm (to be decided)
+- ...
 
 ## Usage
 
@@ -180,11 +158,16 @@ Distributed tests use `local_cluster` to programmatically spawn multiple Elixir 
 
 ## Formal Specification
 
-TLA+ specification for verifying protocol correctness:
+The TLA+ model lives under `tla/` and captures the Bracha Reliable Broadcast protocol we ship in Lab-2:
+- `DistributedDb.tla` models SEND/ECHO/READY phases, per-node message state machines, quorum thresholds (`n - 2f`, `f + 1`, `2f + 1`), and the replicated key-value state.
+- `DistributedDb.cfg` configures the TLC model checker with representative constants and invariants (e.g., `TypeOK`, at-most-once delivery).
+- `states/` stores sample TLC checkpoints for longer runs.
+
+Run the checker from inside the `tla/` directory:
 
 ```bash
-# Check the specification with TLC model checker
+cd tla
 tlc DistributedDb.tla -config DistributedDb.cfg
 ```
 
-See [TLA_README.md](TLA_README.md) for detailed documentation on the formal specification.
+See [TLA_README.md](tla/TLA_README.md) for deeper walkthroughs and modeling notes.
