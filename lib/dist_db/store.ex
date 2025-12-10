@@ -1,12 +1,15 @@
 defmodule DistDb.Store do
   @moduledoc """
-  Public key-value store API.
+  Public key-value store API and Raft apply callback.
 
-  This GenServer owns the in-memory key-value state on each node.
+  The actual key-value data lives in a DETS table; Raft stays
+  generic and only calls `apply/1` that is passed in as a
+  callback.
   """
 
   @dets_table :dist_db_store
-  @dets_file  ~c"dist_db_store.dets"
+  @dets_file ~c"dist_db_store.dets"
+
   use GenServer
   require Logger
 
@@ -24,9 +27,8 @@ defmodule DistDb.Store do
   Creates new entry or updates existing one.
   """
   def put(key, value) do
-    DistDb.Raft.propose(fn ->
-      GenServer.call(__MODULE__, {:put, key, value})
-    end)
+    command = {:put, key, value} |> :erlang.term_to_binary()
+    Raft.propose(command)
   end
 
   @doc """
@@ -42,9 +44,22 @@ defmodule DistDb.Store do
   Returns :ok whether key existed or not.
   """
   def delete(key) do
-    DistDb.Raft.propose(fn ->
-      GenServer.call(__MODULE__, {:delete, key})
-    end)
+    command = {:delete, key} |> :erlang.term_to_binary()
+    Raft.propose(command)
+  end
+
+  ## Raft apply callback
+
+  def apply(command) do
+    case :erlang.binary_to_term(command) do
+      {:put, key, value} ->
+        :ok = :dets.insert(@dets_table, {key, value})
+        :ok
+
+      {:delete, key} ->
+        :ok = :dets.delete(@dets_table, key)
+        :ok
+    end
   end
 
   ## Server callbacks
@@ -65,18 +80,6 @@ defmodule DistDb.Store do
       end
 
     {:reply, value, state}
-  end
-
-  @impl true
-  def handle_call({:put, key, value}, _from, state) do
-    :ok = :dets.insert(@dets_table, {key, value})
-    {:reply, :ok, state}
-  end
-
-  @impl true
-  def handle_call({:delete, key}, _from, state) do
-    :ok = :dets.delete(@dets_table, key)
-    {:reply, :ok, state}
   end
 
   @impl true

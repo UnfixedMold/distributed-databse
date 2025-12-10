@@ -18,7 +18,8 @@ defmodule DistDb.Application do
 
     children = [
       {Cluster.Supervisor, [topologies, [name: DistDb.ClusterSupervisor]]},
-      DistDb.Store
+      {DistDb.Store, []},
+      {Raft, [apply_fun: &DistDb.Store.apply/1]}
     ]
 
     opts = [strategy: :one_for_one, name: DistDb.Supervisor]
