@@ -5,6 +5,9 @@ defmodule DistDb.Store do
   This GenServer owns the in-memory key-value state on each node.
   """
 
+  @dets_table :dist_db_store
+  @dets_file  ~c"dist_db_store.dets"
+
   @behaviour Raft.StateMachine
   use GenServer
   require Logger
@@ -25,7 +28,7 @@ defmodule DistDb.Store do
   def put(key, value) do
     command = {:put, key, value} |> :erlang.term_to_binary()
     Raft.propose(command)
-    GenServer.call(__MODULE__, {:put, key, value})
+    :ok
   end
 
   @doc """
@@ -43,7 +46,7 @@ defmodule DistDb.Store do
   def delete(key) do
     command = {:delete, key} |> :erlang.term_to_binary()
     Raft.propose(command)
-    GenServer.call(__MODULE__, {:delete, key})
+    :ok
   end
 
   @impl true
@@ -62,24 +65,37 @@ defmodule DistDb.Store do
   @impl true
   def init(:ok) do
     Logger.info("Starting DistDb.Store on node #{Node.self()}")
-    {:ok, %{}}
+    {:ok, _} = :dets.open_file(@dets_table, type: :set, file: @dets_file)
+    {:ok, %{file: @dets_file}}
   end
 
   @impl true
   def handle_call({:get, key}, _from, state) do
-    {:reply, Map.get(state, key), state}
+    value =
+      case :dets.lookup(@dets_table, key) do
+        [{^key, v}] -> v
+        [] -> nil
+      end
+
+    {:reply, value, state}
   end
 
   @impl true
   def handle_call({:put, key, value}, _from, state) do
-    new_state = Map.put(state, key, value)
-    {:reply, :ok, new_state}
+    :ok = :dets.insert(@dets_table, {key, value})
+    {:reply, :ok, state}
   end
 
   @impl true
   def handle_call({:delete, key}, _from, state) do
-    new_state = Map.delete(state, key)
-    {:reply, :ok, new_state}
+    :ok = :dets.delete(@dets_table, key)
+    {:reply, :ok, state}
+  end
+
+  @impl true
+  def terminate(_reason, _state) do
+    :dets.close(@dets_table)
+    :ok
   end
 
   @impl true

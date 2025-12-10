@@ -31,3 +31,6 @@ vu_dist_sys_devcontainer-*.tar
 
 # claude settings
 .claude
+
+# DETS storage files
+*.dets
