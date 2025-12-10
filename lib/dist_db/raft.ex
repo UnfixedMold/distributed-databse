@@ -69,6 +69,8 @@ defmodule DistDb.Raft do
       Node.list()
       |> Enum.reject(&(&1 == Node.self()))
 
+    commit_index = Map.get(persisted_meta, :commit_index, 0)
+
     state = %{
       id: Node.self(),
       role: :follower,
@@ -77,8 +79,8 @@ defmodule DistDb.Raft do
       voted_for: persisted_meta.voted_for,
       log: log,
       last_index: last_index,
-      commit_index: 0,
-      last_applied: 0,
+      commit_index: commit_index,
+      last_applied: commit_index,
       apply_fun: apply_fun,
       peers: peers,
       next_index: %{},
@@ -88,7 +90,13 @@ defmodule DistDb.Raft do
       heartbeat_ref: nil
     }
 
-    state = reset_election_timeout(state)
+    state =
+      if peers == [] do
+        become_leader(state)
+      else
+        reset_election_timeout(state)
+      end
+
     {:ok, state}
   end
 
@@ -582,7 +590,7 @@ defmodule DistDb.Raft do
     meta =
       case :dets.lookup(@dets_table, :meta) do
         [{:meta, value}] -> value
-        [] -> %{current_term: 0, voted_for: nil}
+        [] -> %{current_term: 0, voted_for: nil, commit_index: 0}
       end
 
     log =
@@ -609,7 +617,8 @@ defmodule DistDb.Raft do
   defp persist_meta(state) do
     meta = %{
       current_term: state.current_term,
-      voted_for: state.voted_for
+      voted_for: state.voted_for,
+      commit_index: state.commit_index
     }
 
     :ok = :dets.insert(@dets_table, {:meta, meta})
