@@ -5,7 +5,6 @@ defmodule DistDb.SingleNodeStoreTest do
   setup do
     :ok = Application.stop(:dist_db)
     {:ok, _} = Application.ensure_all_started(:dist_db)
-    :sys.replace_state(DistDb.Broadcast, fn _ -> %{messages: %{}} end)
     DistDb.Store.clear()
     :ok
   end

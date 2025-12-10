@@ -18,7 +18,7 @@ defmodule DistDb.Application do
 
     children = [
       {Cluster.Supervisor, [topologies, [name: DistDb.ClusterSupervisor]]},
-      DistDb.Broadcast,
+      DistDb.Raft,
       DistDb.Store
     ]
 

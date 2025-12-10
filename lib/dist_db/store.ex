@@ -21,7 +21,7 @@ defmodule DistDb.Store do
   @doc """
   Puts a key-value pair into the store.
   Creates new entry or updates existing one.
-  Broadcasts via Bracha RBC to all connected nodes.
+  In Lab-3 this is replicated via Raft.
   """
   def put(key, value) do
     GenServer.call(__MODULE__, {:put, key, value})
@@ -38,7 +38,7 @@ defmodule DistDb.Store do
   @doc """
   Deletes a key from the store.
   Returns :ok whether key existed or not.
-  Broadcasts via Bracha RBC to all connected nodes.
+  In Lab-3 this is replicated via Raft.
   """
   def delete(key) do
     GenServer.call(__MODULE__, {:delete, key})
@@ -80,15 +80,12 @@ defmodule DistDb.Store do
   def init(:ok) do
     Logger.info("Starting DistDb.Store on node #{Node.self()}")
 
-    :net_kernel.monitor_nodes(true)
-
     {:ok, %{}}
   end
 
   @impl true
   def handle_call({:put, key, value}, _from, state) do
-    # Broadcast the operation
-    DistDb.Broadcast.broadcast(fn -> deliver_put(key, value) end)
+    DistDb.Raft.submit({:put, key, value})
     {:reply, :ok, state}
   end
 
@@ -99,8 +96,7 @@ defmodule DistDb.Store do
 
   @impl true
   def handle_call({:delete, key}, _from, state) do
-    # Broadcast the operation
-    DistDb.Broadcast.broadcast(fn -> deliver_delete(key) end)
+    DistDb.Raft.submit({:delete, key})
     {:reply, :ok, state}
   end
 
@@ -124,30 +120,6 @@ defmodule DistDb.Store do
   def handle_call({:deliver_delete, key}, _from, state) do
     new_state = Map.delete(state, key)
     {:reply, :ok, new_state}
-  end
-
-  # When I'm empty and connect to a node, pull their state
-  @impl true
-  def handle_info({:nodeup, node}, state) when map_size(state) == 0 do
-    Logger.info("Empty node syncing from #{node}")
-
-    case :rpc.call(node, __MODULE__, :list_all, [], 5_000) do
-      synced_state when is_map(synced_state) -> {:noreply, synced_state}
-      _error -> {:noreply, state}
-    end
-  end
-
-  # When I already have data, just log the connection
-  @impl true
-  def handle_info({:nodeup, node}, state) do
-    Logger.info("Connected to #{node}")
-    {:noreply, state}
-  end
-
-  @impl true
-  def handle_info({:nodedown, node}, state) do
-    Logger.info("Node #{node} disconnected")
-    {:noreply, state}
   end
 
   @impl true
