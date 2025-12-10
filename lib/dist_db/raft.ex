@@ -370,7 +370,9 @@ defmodule DistDb.Raft do
         leader_id: leader_id,
         current_term: new_term,
         voted_for: nil,
-        votes_received: 0
+        votes_received: 0,
+        next_index: %{},
+        match_index: %{}
     }
 
     persist_meta(state1)
@@ -380,13 +382,29 @@ defmodule DistDb.Raft do
   defp become_leader(state) do
     Logger.info("[#{inspect(Node.self())}] became leader in term #{state.current_term}")
 
-    state
-    |> cancel_election_timeout()
-    |> cancel_heartbeat()
-    |> Map.put(:role, :leader)
-    |> Map.put(:leader_id, state.id)
-    |> Map.put(:votes_received, 0)
-    |> schedule_heartbeat()
+    last_index = state.last_index
+
+    next_index =
+      state.peers
+      |> Enum.map(&{&1, last_index + 1})
+      |> Map.new()
+
+    match_index =
+      state.peers
+      |> Enum.map(&{&1, 0})
+      |> Map.new()
+
+    state =
+      state
+      |> cancel_election_timeout()
+      |> cancel_heartbeat()
+      |> Map.put(:role, :leader)
+      |> Map.put(:leader_id, state.id)
+      |> Map.put(:votes_received, 0)
+      |> Map.put(:next_index, next_index)
+      |> Map.put(:match_index, match_index)
+
+    schedule_heartbeat(state)
   end
 
   defp reset_election_timeout(state) do
