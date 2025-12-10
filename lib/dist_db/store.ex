@@ -8,7 +8,7 @@ defmodule DistDb.Store do
   """
 
   @dets_table :dist_db_store
-  @data_root "app_data"
+  @dets_file "dist_db_store.dets"
 
   use GenServer
   require Logger
@@ -28,7 +28,7 @@ defmodule DistDb.Store do
   """
   def put(key, value) do
     command = {:put, key, value} |> :erlang.term_to_binary()
-    Raft.propose(command)
+    DistDb.Raft.propose(command)
   end
 
   @doc """
@@ -45,7 +45,7 @@ defmodule DistDb.Store do
   """
   def delete(key) do
     command = {:delete, key} |> :erlang.term_to_binary()
-    Raft.propose(command)
+    DistDb.Raft.propose(command)
   end
 
   ## Raft apply callback
@@ -67,7 +67,7 @@ defmodule DistDb.Store do
   @impl true
   def init(:ok) do
     Logger.info("Starting DistDb.Store on node #{Node.self()}")
-    dets_file = open_dets_for_current_node()
+    dets_file = DistDb.Storage.open_node_dets(@dets_table, @dets_file)
     {:ok, %{file: dets_file}}
   end
 
@@ -91,26 +91,5 @@ defmodule DistDb.Store do
   @impl true
   def handle_info(_msg, state) do
     {:noreply, state}
-  end
-
-  ## Internal helpers
-
-  defp open_dets_for_current_node do
-    node_dir = node_data_dir(Node.self())
-    :ok = File.mkdir_p(node_dir)
-
-    dets_file =
-      node_dir
-      |> Path.join("dist_db_store.dets")
-      |> String.to_charlist()
-
-    {:ok, _} = :dets.open_file(@dets_table, type: :set, file: dets_file)
-    dets_file
-  end
-
-  defp node_data_dir(node) do
-    node
-    |> Atom.to_string()
-    |> then(&Path.join(@data_root, &1))
   end
 end

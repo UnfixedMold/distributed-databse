@@ -1,9 +1,9 @@
-defmodule Raft do
+defmodule DistDb.Raft do
   @moduledoc """
   Generic Raft core (single-node stub).
 
-  This module knows nothing about DistDb. It maintains a log
-  of opaque binary commands and, for each committed entry,
+  This module knows nothing about DistDb.Store. It maintains a
+  log of opaque binary commands and, for each committed entry,
   calls a user-provided apply function.
 
   For now this is a single-node implementation that appends
@@ -15,6 +15,8 @@ defmodule Raft do
   use GenServer
 
   @type command :: binary()
+  @dets_table :dist_db_raft
+  @dets_file "raft_log.dets"
 
   ## Client API
 
@@ -45,16 +47,30 @@ defmodule Raft do
 
   @impl true
   def init(apply_fun) do
+    dets_file = DistDb.Storage.open_node_dets(@dets_table, @dets_file)
+    {persisted_meta, persisted_log} = load_persistent_state()
+
+    log =
+      persisted_log
+      |> Enum.sort_by(& &1.index, :desc)
+
+    last_index =
+      case log do
+        [%{index: idx} | _] -> idx
+        [] -> 0
+      end
+
     state = %{
       id: Node.self(),
       role: :leader,
-      current_term: 0,
-      voted_for: nil,
-      log: [],
-      last_index: 0,
+      current_term: persisted_meta.current_term,
+      voted_for: persisted_meta.voted_for,
+      log: log,
+      last_index: last_index,
       commit_index: 0,
       last_applied: 0,
-      apply_fun: apply_fun
+      apply_fun: apply_fun,
+      dets_file: dets_file
     }
 
     {:ok, state}
@@ -78,6 +94,7 @@ defmodule Raft do
       command: command
     }
 
+    persist_entry(entry, %{state | last_index: index})
     new_state = %{state | log: [entry | state.log], last_index: index}
     {entry, new_state}
   end
@@ -109,5 +126,47 @@ defmodule Raft do
       end)
 
     {%{state | last_applied: last_applied}, last_reply}
+  end
+
+  @impl true
+  def terminate(_reason, _state) do
+    :dets.close(@dets_table)
+    :ok
+  end
+
+  ## DETS helpers
+
+  defp load_persistent_state do
+    meta =
+      case :dets.lookup(@dets_table, :meta) do
+        [{:meta, value}] -> value
+        [] -> %{current_term: 0, voted_for: nil}
+      end
+
+    log =
+      :dets.foldl(
+        fn
+          {index, %{index: _, term: _, command: _} = entry}, acc when is_integer(index) ->
+            [entry | acc]
+
+          _, acc ->
+            acc
+        end,
+        [],
+        @dets_table
+      )
+
+    {meta, log}
+  end
+
+  defp persist_entry(entry, state) do
+    :ok = :dets.insert(@dets_table, {entry.index, entry})
+
+    meta = %{
+      current_term: state.current_term,
+      voted_for: state.voted_for
+    }
+
+    :ok = :dets.insert(@dets_table, {:meta, meta})
   end
 end
