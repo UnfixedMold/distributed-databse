@@ -81,6 +81,8 @@ defmodule DistDb.Raft do
       last_applied: 0,
       apply_fun: apply_fun,
       peers: peers,
+      next_index: %{},
+      match_index: %{},
       votes_received: 0,
       election_timeout_ref: nil,
       heartbeat_ref: nil
@@ -95,6 +97,7 @@ defmodule DistDb.Raft do
     case state.role do
       :leader ->
         {entry, state} = append_entry(command, state)
+        state = replicate_entry_to_followers(entry, state)
         {state, reply} = advance_commit_index(entry.index, state)
         {:reply, reply, state}
 
@@ -183,8 +186,16 @@ defmodule DistDb.Raft do
   end
 
   @impl true
-  def handle_cast({:append_entries_response, _rpc}, state) do
-    # Leader-side handling will be implemented in the next step.
+  def handle_cast({:append_entries_response, rpc}, state) do
+    state = maybe_step_down(state, rpc.term)
+
+    state =
+      if state.role == :leader and rpc.term == state.current_term do
+        handle_append_entries_ack(rpc, state)
+      else
+        state
+      end
+
     {:noreply, state}
   end
 
@@ -235,6 +246,14 @@ defmodule DistDb.Raft do
   defp advance_commit_index(target_index, state) do
     state = %{state | commit_index: max(state.commit_index, target_index)}
     apply_committed_entries(state)
+  end
+
+  defp replicate_entry_to_followers(entry, state) do
+    Enum.each(state.peers, fn peer ->
+      send_append_entries_to_peer(peer, [entry], state)
+    end)
+
+    state
   end
 
   defp apply_append_entries(state, rpc) do
@@ -433,6 +452,22 @@ defmodule DistDb.Raft do
     end)
   end
 
+  defp send_append_entries_to_peer(peer, entries, state) do
+    prev_index = state.last_index
+    prev_term = last_log_term(state)
+
+    rpc = %{
+      term: state.current_term,
+      leader_id: state.id,
+      prev_log_index: prev_index,
+      prev_log_term: prev_term,
+      entries: entries,
+      leader_commit: state.commit_index
+    }
+
+    GenServer.cast({__MODULE__, peer}, {:append_entries, rpc})
+  end
+
   defp send_request_vote_response(state, candidate_id, granted) do
     rpc = %{
       term: state.current_term,
@@ -452,6 +487,29 @@ defmodule DistDb.Raft do
     }
 
     GenServer.cast({__MODULE__, leader_id}, {:append_entries_response, rpc})
+  end
+
+  defp handle_append_entries_ack(rpc, state) do
+    peer = rpc.follower_id
+
+    state =
+      if rpc.success do
+        new_match = rpc.match_index
+
+        new_next_index =
+          Map.put(state.next_index, peer, new_match + 1)
+
+        new_match_index =
+          Map.put(state.match_index, peer, new_match)
+
+        %{state | next_index: new_next_index, match_index: new_match_index}
+      else
+        current_next = Map.get(state.next_index, peer, state.last_index + 1)
+        new_next = max(1, current_next - 1)
+        %{state | next_index: Map.put(state.next_index, peer, new_next)}
+      end
+
+    state
   end
 
   ## Persistence (DETS) helpers
