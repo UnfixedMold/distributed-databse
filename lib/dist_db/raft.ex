@@ -97,7 +97,7 @@ defmodule DistDb.Raft do
     case state.role do
       :leader ->
         {entry, state} = append_entry(command, state)
-        state = replicate_entry_to_followers(entry, state)
+        state = replicate_entry_to_followers(state)
         {state, reply} = advance_commit_index(entry.index, state)
         {:reply, reply, state}
 
@@ -217,7 +217,10 @@ defmodule DistDb.Raft do
     state =
       case state.role do
         :leader ->
-          broadcast_append_entries(state, [], state.commit_index)
+          Enum.each(state.peers, fn peer ->
+            send_append_entries_to_peer(peer, state)
+          end)
+
           schedule_heartbeat(state)
 
         _other ->
@@ -248,9 +251,9 @@ defmodule DistDb.Raft do
     apply_committed_entries(state)
   end
 
-  defp replicate_entry_to_followers(entry, state) do
+  defp replicate_entry_to_followers(state) do
     Enum.each(state.peers, fn peer ->
-      send_append_entries_to_peer(peer, [entry], state)
+      send_append_entries_to_peer(peer, state)
     end)
 
     state
@@ -299,6 +302,15 @@ defmodule DistDb.Raft do
   defp last_log_term(%{log: []}), do: 0
   defp last_log_term(%{log: [%{term: term} | _]}), do: term
 
+  defp term_at_index(_state, 0), do: 0
+
+  defp term_at_index(state, index) do
+    case Enum.find(state.log, &(&1.index == index)) do
+      nil -> 0
+      %{term: term} -> term
+    end
+  end
+
   defp truncate_log_after(state, index) do
     new_log = Enum.reject(state.log, &(&1.index > index))
     %{state | log: new_log}
@@ -314,6 +326,12 @@ defmodule DistDb.Raft do
           last_index: max(st.last_index, entry.index)
       }
     end)
+  end
+
+  defp entries_from(state, from_index) do
+    state.log
+    |> Enum.filter(&(&1.index >= from_index))
+    |> Enum.sort_by(& &1.index)
   end
 
   defp prev_log_matches?(_state, 0, _term), do: true
@@ -437,24 +455,11 @@ defmodule DistDb.Raft do
     end)
   end
 
-  defp broadcast_append_entries(state, entries, leader_commit) do
-    rpc = %{
-      term: state.current_term,
-      leader_id: state.id,
-      prev_log_index: state.last_index,
-      prev_log_term: last_log_term(state),
-      entries: entries,
-      leader_commit: leader_commit
-    }
-
-    Enum.each(state.peers, fn peer ->
-      GenServer.cast({__MODULE__, peer}, {:append_entries, rpc})
-    end)
-  end
-
-  defp send_append_entries_to_peer(peer, entries, state) do
-    prev_index = state.last_index
-    prev_term = last_log_term(state)
+  defp send_append_entries_to_peer(peer, state) do
+    next_index = Map.get(state.next_index, peer, state.last_index + 1)
+    prev_index = max(next_index - 1, 0)
+    prev_term = term_at_index(state, prev_index)
+    entries = entries_from(state, next_index)
 
     rpc = %{
       term: state.current_term,
