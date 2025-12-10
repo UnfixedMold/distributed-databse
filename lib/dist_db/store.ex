@@ -67,8 +67,8 @@ defmodule DistDb.Store do
   @impl true
   def init(:ok) do
     Logger.info("Starting DistDb.Store on node #{Node.self()}")
-    dets_file = DistDb.Storage.open_node_dets(@dets_table, @dets_file)
-    {:ok, %{file: dets_file}}
+    _dets_file = DistDb.Storage.open_node_dets(@dets_table, @dets_file)
+    {:ok, %{}}
   end
 
   @impl true

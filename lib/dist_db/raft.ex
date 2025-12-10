@@ -14,6 +14,8 @@ defmodule DistDb.Raft do
 
   use GenServer
 
+  require Logger
+
   @type command :: binary()
   @dets_table :dist_db_raft
   @dets_file "raft_log.dets"
@@ -47,7 +49,7 @@ defmodule DistDb.Raft do
 
   @impl true
   def init(apply_fun) do
-    dets_file = DistDb.Storage.open_node_dets(@dets_table, @dets_file)
+    DistDb.Storage.open_node_dets(@dets_table, @dets_file)
     {persisted_meta, persisted_log} = load_persistent_state()
 
     log =
@@ -60,9 +62,14 @@ defmodule DistDb.Raft do
         [] -> 0
       end
 
+    peers =
+      Node.list()
+      |> Enum.reject(&(&1 == Node.self()))
+
     state = %{
       id: Node.self(),
       role: :leader,
+      leader_id: Node.self(),
       current_term: persisted_meta.current_term,
       voted_for: persisted_meta.voted_for,
       log: log,
@@ -70,7 +77,7 @@ defmodule DistDb.Raft do
       commit_index: 0,
       last_applied: 0,
       apply_fun: apply_fun,
-      dets_file: dets_file
+      peers: peers
     }
 
     {:ok, state}
@@ -81,6 +88,26 @@ defmodule DistDb.Raft do
     {entry, state} = append_entry(command, state)
     {state, reply} = advance_commit_index(entry.index, state)
     {:reply, reply, state}
+  end
+
+  @impl true
+  def handle_cast({:request_vote, rpc}, state) do
+    Logger.debug(
+      "[#{inspect(Node.self())}] received RequestVote from #{inspect(rpc.candidate_id)} in term #{rpc.term}"
+    )
+
+    # Voting logic will be implemented in the next step.
+    {:noreply, state}
+  end
+
+  @impl true
+  def handle_cast({:append_entries, rpc}, state) do
+    Logger.debug(
+      "[#{inspect(Node.self())}] received AppendEntries from #{inspect(rpc.leader_id)} in term #{rpc.term}"
+    )
+
+    # Log replication / heartbeat handling will be implemented in the next step.
+    {:noreply, state}
   end
 
   ## Internal helpers
@@ -102,6 +129,44 @@ defmodule DistDb.Raft do
   defp advance_commit_index(target_index, state) do
     state = %{state | commit_index: max(state.commit_index, target_index)}
     apply_committed_entries(state)
+  end
+
+  defp last_log_term(%{log: []}), do: 0
+
+  defp last_log_term(%{log: [%{term: term} | _]}), do: term
+
+  defp last_log_term(%{log: log}) do
+    log
+    |> Enum.max_by(& &1.index)
+    |> Map.fetch!(:term)
+  end
+
+  defp broadcast_request_vote(state) do
+    rpc = %{
+      term: state.current_term,
+      candidate_id: state.id,
+      last_log_index: state.last_index,
+      last_log_term: last_log_term(state)
+    }
+
+    Enum.each(state.peers, fn peer ->
+      GenServer.cast({__MODULE__, peer}, {:request_vote, rpc})
+    end)
+  end
+
+  defp broadcast_append_entries(state, entries, leader_commit) do
+    rpc = %{
+      term: state.current_term,
+      leader_id: state.id,
+      prev_log_index: state.last_index,
+      prev_log_term: last_log_term(state),
+      entries: entries,
+      leader_commit: leader_commit
+    }
+
+    Enum.each(state.peers, fn peer ->
+      GenServer.cast({__MODULE__, peer}, {:append_entries, rpc})
+    end)
   end
 
   defp apply_committed_entries(state) do
