@@ -40,8 +40,8 @@ defmodule DistDb.Raft do
   @doc """
   Propose a command to be replicated.
 
-  For now this just appends the command to a local log and
-  applies it immediately to the state machine.
+  Only the current leader accepts proposals; followers return
+  an error indicating who they believe the leader is.
   """
   @spec propose(command()) :: reply :: term()
   def propose(command) when is_binary(command) do
@@ -92,9 +92,15 @@ defmodule DistDb.Raft do
 
   @impl true
   def handle_call({:propose, command}, _from, state) do
-    {entry, state} = append_entry(command, state)
-    {state, reply} = advance_commit_index(entry.index, state)
-    {:reply, reply, state}
+    case state.role do
+      :leader ->
+        {entry, state} = append_entry(command, state)
+        {state, reply} = advance_commit_index(entry.index, state)
+        {:reply, reply, state}
+
+      _other ->
+        {:reply, {:error, :not_leader, state.leader_id}, state}
+    end
   end
 
   @impl true
@@ -136,16 +142,20 @@ defmodule DistDb.Raft do
 
     state = maybe_step_down(state, rpc.term)
 
-    state =
+    {state, success} =
       if rpc.term < state.current_term do
-        state
+        {state, false}
       else
-        state
-        |> Map.put(:leader_id, rpc.leader_id)
-        |> Map.put(:role, :follower)
-        |> reset_election_timeout()
+        state =
+          state
+          |> Map.put(:leader_id, rpc.leader_id)
+          |> Map.put(:role, :follower)
+          |> reset_election_timeout()
+
+        apply_append_entries(state, rpc)
       end
 
+    send_append_entries_response(state, rpc.leader_id, success)
     {:noreply, state}
   end
 
@@ -169,6 +179,12 @@ defmodule DistDb.Raft do
         state
       end
 
+    {:noreply, state}
+  end
+
+  @impl true
+  def handle_cast({:append_entries_response, _rpc}, state) do
+    # Leader-side handling will be implemented in the next step.
     {:noreply, state}
   end
 
@@ -200,7 +216,7 @@ defmodule DistDb.Raft do
     {:noreply, state}
   end
 
-  ## Log helpers
+  ## Log and commit helpers
 
   defp append_entry(command, state) do
     index = state.last_index + 1
@@ -219,6 +235,22 @@ defmodule DistDb.Raft do
   defp advance_commit_index(target_index, state) do
     state = %{state | commit_index: max(state.commit_index, target_index)}
     apply_committed_entries(state)
+  end
+
+  defp apply_append_entries(state, rpc) do
+    if not prev_log_matches?(state, rpc.prev_log_index, rpc.prev_log_term) do
+      {state, false}
+    else
+      state =
+        state
+        |> truncate_log_after(rpc.prev_log_index)
+        |> append_entries(rpc.entries)
+
+      new_commit_index = min(rpc.leader_commit, state.last_index)
+      {state, _reply} = advance_commit_index(new_commit_index, state)
+
+      {state, true}
+    end
   end
 
   defp apply_committed_entries(state) do
@@ -248,21 +280,33 @@ defmodule DistDb.Raft do
   defp last_log_term(%{log: []}), do: 0
   defp last_log_term(%{log: [%{term: term} | _]}), do: term
 
-  defp candidate_log_up_to_date?(rpc, state) do
-    local_last_term = last_log_term(state)
+  defp truncate_log_after(state, index) do
+    new_log = Enum.reject(state.log, &(&1.index > index))
+    %{state | log: new_log}
+  end
 
-    if rpc.last_log_term > local_last_term do
-      true
-    else
-      if rpc.last_log_term < local_last_term do
-        false
-      else
-        rpc.last_log_index >= state.last_index
-      end
+  defp append_entries(state, entries) do
+    Enum.reduce(entries, state, fn entry, st ->
+      persist_entry(entry, st)
+
+      %{
+        st
+        | log: [entry | st.log],
+          last_index: max(st.last_index, entry.index)
+      }
+    end)
+  end
+
+  defp prev_log_matches?(_state, 0, _term), do: true
+
+  defp prev_log_matches?(state, prev_index, prev_term) do
+    case Enum.find(state.log, &(&1.index == prev_index)) do
+      nil -> false
+      %{term: term} -> term == prev_term
     end
   end
 
-  ## Election and role helpers
+  ## Election, voting and role helpers
 
   defp start_election(state) do
     Logger.info("[#{inspect(Node.self())}] starting election in term #{state.current_term + 1}")
@@ -345,6 +389,20 @@ defmodule DistDb.Raft do
     end
   end
 
+  defp candidate_log_up_to_date?(rpc, state) do
+    local_last_term = last_log_term(state)
+
+    if rpc.last_log_term > local_last_term do
+      true
+    else
+      if rpc.last_log_term < local_last_term do
+        false
+      else
+        rpc.last_log_index >= state.last_index
+      end
+    end
+  end
+
   ## RPC helpers
 
   defp broadcast_request_vote(state) do
@@ -375,10 +433,25 @@ defmodule DistDb.Raft do
     end)
   end
 
-  @impl true
-  def terminate(_reason, _state) do
-    :dets.close(@dets_table)
-    :ok
+  defp send_request_vote_response(state, candidate_id, granted) do
+    rpc = %{
+      term: state.current_term,
+      vote_granted: granted,
+      voter_id: state.id
+    }
+
+    GenServer.cast({__MODULE__, candidate_id}, {:request_vote_response, rpc})
+  end
+
+  defp send_append_entries_response(state, leader_id, success) do
+    rpc = %{
+      term: state.current_term,
+      success: success,
+      follower_id: state.id,
+      match_index: state.last_index
+    }
+
+    GenServer.cast({__MODULE__, leader_id}, {:append_entries_response, rpc})
   end
 
   ## Persistence (DETS) helpers
@@ -420,13 +493,9 @@ defmodule DistDb.Raft do
     :ok = :dets.insert(@dets_table, {:meta, meta})
   end
 
-  defp send_request_vote_response(state, candidate_id, granted) do
-    rpc = %{
-      term: state.current_term,
-      vote_granted: granted,
-      voter_id: state.id
-    }
-
-    GenServer.cast({__MODULE__, candidate_id}, {:request_vote_response, rpc})
+  @impl true
+  def terminate(_reason, _state) do
+    :dets.close(@dets_table)
+    :ok
   end
 end
