@@ -96,10 +96,10 @@ defmodule DistDb.Raft do
   def handle_call({:propose, command}, _from, state) do
     case state.role do
       :leader ->
-        {entry, state} = append_entry(command, state)
+        {_entry, state} = append_entry(command, state)
         state = replicate_entry_to_followers(state)
-        {state, reply} = advance_commit_index(entry.index, state)
-        {:reply, reply, state}
+        state = maybe_advance_leader_commit(state)
+        {:reply, :ok, state}
 
       _other ->
         {:reply, {:error, :not_leader, state.leader_id}, state}
@@ -249,6 +249,47 @@ defmodule DistDb.Raft do
   defp advance_commit_index(target_index, state) do
     state = %{state | commit_index: max(state.commit_index, target_index)}
     apply_committed_entries(state)
+  end
+
+  defp maybe_advance_leader_commit(state) do
+    if state.role != :leader do
+      state
+    else
+      new_commit_index = compute_leader_commit_index(state)
+
+      if new_commit_index > state.commit_index do
+        {state, _reply} = advance_commit_index(new_commit_index, state)
+        state
+      else
+        state
+      end
+    end
+  end
+
+  defp compute_leader_commit_index(state) do
+    total_nodes = 1 + length(state.peers)
+    majority = div(total_nodes, 2) + 1
+
+    candidate_indices =
+      state.log
+      |> Enum.filter(fn entry ->
+        entry.term == state.current_term and entry.index > state.commit_index
+      end)
+      |> Enum.map(& &1.index)
+
+    Enum.reduce(candidate_indices, state.commit_index, fn index, acc ->
+      count =
+        1 +
+          Enum.count(state.peers, fn peer ->
+            Map.get(state.match_index, peer, 0) >= index
+          end)
+
+      if count >= majority do
+        max(acc, index)
+      else
+        acc
+      end
+    end)
   end
 
   defp replicate_entry_to_followers(state) do
@@ -532,7 +573,7 @@ defmodule DistDb.Raft do
         %{state | next_index: Map.put(state.next_index, peer, new_next)}
       end
 
-    state
+    maybe_advance_leader_commit(state)
   end
 
   ## Persistence (DETS) helpers
