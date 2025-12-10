@@ -116,10 +116,6 @@ defmodule DistDb.Raft do
 
   @impl true
   def handle_cast({:request_vote, rpc}, state) do
-    Logger.debug(
-      "[#{inspect(Node.self())}] received RequestVote from #{inspect(rpc.candidate_id)} in term #{rpc.term}"
-    )
-
     state = maybe_step_down(state, rpc.term)
 
     state =
@@ -147,10 +143,6 @@ defmodule DistDb.Raft do
 
   @impl true
   def handle_cast({:append_entries, rpc}, state) do
-    Logger.debug(
-      "[#{inspect(Node.self())}] received AppendEntries from #{inspect(rpc.leader_id)} in term #{rpc.term}"
-    )
-
     state = maybe_step_down(state, rpc.term)
 
     {state, success} =
@@ -209,8 +201,6 @@ defmodule DistDb.Raft do
 
   @impl true
   def handle_info(:election_timeout, state) do
-    Logger.debug("[#{inspect(Node.self())}] election timeout in role #{state.role}")
-
     state =
       case state.role do
         :leader -> state
