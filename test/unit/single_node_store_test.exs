@@ -5,7 +5,6 @@ defmodule DistDb.SingleNodeStoreTest do
   setup do
     :ok = Application.stop(:dist_db)
     {:ok, _} = Application.ensure_all_started(:dist_db)
-    DistDb.Store.clear()
     :ok
   end
 
@@ -31,11 +30,5 @@ defmodule DistDb.SingleNodeStoreTest do
       eventually(fn -> assert DistDb.Store.get("temp") == nil end)
     end
 
-    test "list_all" do
-      assert :ok = DistDb.Store.put("a", 1)
-      assert :ok = DistDb.Store.put("b", 2)
-
-      eventually(fn -> assert %{"a" => 1, "b" => 2} = DistDb.Store.list_all() end)
-    end
   end
 end

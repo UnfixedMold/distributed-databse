@@ -1,15 +1,15 @@
 defmodule DistDb.Store do
   @moduledoc """
-  A GenServer that maintains an in-memory key-value store.
+  Public key-value store API.
 
-  This is the core storage component for Lab-1, providing basic
-  key-value operations without replication (added in later steps).
+  This GenServer owns the in-memory key-value state on each node.
   """
 
+  @behaviour Raft.StateMachine
   use GenServer
   require Logger
 
-  # Client API
+  ## Client API
 
   @doc """
   Starts the Store GenServer.
@@ -21,9 +21,10 @@ defmodule DistDb.Store do
   @doc """
   Puts a key-value pair into the store.
   Creates new entry or updates existing one.
-  In Lab-3 this is replicated via Raft.
   """
   def put(key, value) do
+    command = {:put, key, value} |> :erlang.term_to_binary()
+    Raft.propose(command)
     GenServer.call(__MODULE__, {:put, key, value})
   end
 
@@ -38,55 +39,30 @@ defmodule DistDb.Store do
   @doc """
   Deletes a key from the store.
   Returns :ok whether key existed or not.
-  In Lab-3 this is replicated via Raft.
   """
   def delete(key) do
+    command = {:delete, key} |> :erlang.term_to_binary()
+    Raft.propose(command)
     GenServer.call(__MODULE__, {:delete, key})
   end
 
-  @doc """
-  Returns all key-value pairs in the store.
-  """
-  def list_all do
-    GenServer.call(__MODULE__, :list_all)
+  @impl true
+  def apply(command) do
+    case :erlang.binary_to_term(command) do
+      {:put, key, value} ->
+        GenServer.call(__MODULE__, {:put, key, value})
+
+      {:delete, key} ->
+        GenServer.call(__MODULE__, {:delete, key})
+    end
   end
 
-  @doc """
-  Clears all data from the store (for testing purposes).
-  """
-  def clear do
-    GenServer.call(__MODULE__, :clear)
-  end
-
-  @doc """
-  Deliver a put operation (called by Broadcast layer).
-  Applies put locally without triggering another broadcast.
-  """
-  def deliver_put(key, value) do
-    GenServer.call(__MODULE__, {:deliver_put, key, value})
-  end
-
-  @doc """
-  Deliver a delete operation (called by Broadcast layer).
-  Applies delete locally without triggering another broadcast.
-  """
-  def deliver_delete(key) do
-    GenServer.call(__MODULE__, {:deliver_delete, key})
-  end
-
-  # Server Callbacks
+  ## Server callbacks
 
   @impl true
   def init(:ok) do
     Logger.info("Starting DistDb.Store on node #{Node.self()}")
-
     {:ok, %{}}
-  end
-
-  @impl true
-  def handle_call({:put, key, value}, _from, state) do
-    DistDb.Raft.submit({:put, key, value})
-    {:reply, :ok, state}
   end
 
   @impl true
@@ -95,29 +71,13 @@ defmodule DistDb.Store do
   end
 
   @impl true
-  def handle_call({:delete, key}, _from, state) do
-    DistDb.Raft.submit({:delete, key})
-    {:reply, :ok, state}
-  end
-
-  @impl true
-  def handle_call(:list_all, _from, state) do
-    {:reply, state, state}
-  end
-
-  @impl true
-  def handle_call(:clear, _from, _state) do
-    {:reply, :ok, %{}}
-  end
-
-  @impl true
-  def handle_call({:deliver_put, key, value}, _from, state) do
+  def handle_call({:put, key, value}, _from, state) do
     new_state = Map.put(state, key, value)
     {:reply, :ok, new_state}
   end
 
   @impl true
-  def handle_call({:deliver_delete, key}, _from, state) do
+  def handle_call({:delete, key}, _from, state) do
     new_state = Map.delete(state, key)
     {:reply, :ok, new_state}
   end

@@ -2,7 +2,7 @@ defmodule DistDb.Application do
   @moduledoc """
   The DistDb Application supervisor.
 
-  Starts the Store GenServer when the application boots.
+  Starts the Raft and Store processes plus clustering when the application boots.
   """
 
   use Application
@@ -18,7 +18,6 @@ defmodule DistDb.Application do
 
     children = [
       {Cluster.Supervisor, [topologies, [name: DistDb.ClusterSupervisor]]},
-      DistDb.Raft,
       DistDb.Store
     ]
 
