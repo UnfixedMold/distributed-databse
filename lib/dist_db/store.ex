@@ -7,8 +7,6 @@ defmodule DistDb.Store do
 
   @dets_table :dist_db_store
   @dets_file  ~c"dist_db_store.dets"
-
-  @behaviour Raft.StateMachine
   use GenServer
   require Logger
 
@@ -26,9 +24,9 @@ defmodule DistDb.Store do
   Creates new entry or updates existing one.
   """
   def put(key, value) do
-    command = {:put, key, value} |> :erlang.term_to_binary()
-    Raft.propose(command)
-    :ok
+    DistDb.Raft.propose(fn ->
+      GenServer.call(__MODULE__, {:put, key, value})
+    end)
   end
 
   @doc """
@@ -44,20 +42,9 @@ defmodule DistDb.Store do
   Returns :ok whether key existed or not.
   """
   def delete(key) do
-    command = {:delete, key} |> :erlang.term_to_binary()
-    Raft.propose(command)
-    :ok
-  end
-
-  @impl true
-  def apply(command) do
-    case :erlang.binary_to_term(command) do
-      {:put, key, value} ->
-        GenServer.call(__MODULE__, {:put, key, value})
-
-      {:delete, key} ->
-        GenServer.call(__MODULE__, {:delete, key})
-    end
+    DistDb.Raft.propose(fn ->
+      GenServer.call(__MODULE__, {:delete, key})
+    end)
   end
 
   ## Server callbacks
