@@ -8,7 +8,7 @@ defmodule DistDb.Store do
   """
 
   @dets_table :dist_db_store
-  @dets_file ~c"dist_db_store.dets"
+  @data_root "app_data"
 
   use GenServer
   require Logger
@@ -67,8 +67,8 @@ defmodule DistDb.Store do
   @impl true
   def init(:ok) do
     Logger.info("Starting DistDb.Store on node #{Node.self()}")
-    {:ok, _} = :dets.open_file(@dets_table, type: :set, file: @dets_file)
-    {:ok, %{file: @dets_file}}
+    dets_file = open_dets_for_current_node()
+    {:ok, %{file: dets_file}}
   end
 
   @impl true
@@ -91,5 +91,26 @@ defmodule DistDb.Store do
   @impl true
   def handle_info(_msg, state) do
     {:noreply, state}
+  end
+
+  ## Internal helpers
+
+  defp open_dets_for_current_node do
+    node_dir = node_data_dir(Node.self())
+    :ok = File.mkdir_p(node_dir)
+
+    dets_file =
+      node_dir
+      |> Path.join("dist_db_store.dets")
+      |> String.to_charlist()
+
+    {:ok, _} = :dets.open_file(@dets_table, type: :set, file: dets_file)
+    dets_file
+  end
+
+  defp node_data_dir(node) do
+    node
+    |> Atom.to_string()
+    |> then(&Path.join(@data_root, &1))
   end
 end
