@@ -19,6 +19,8 @@ defmodule DistDb.Raft do
   @type command :: binary()
   @dets_table :dist_db_raft
   @dets_file "raft_log.dets"
+  @election_timeout_min 150
+  @election_timeout_max 300
 
   ## Client API
 
@@ -68,8 +70,8 @@ defmodule DistDb.Raft do
 
     state = %{
       id: Node.self(),
-      role: :leader,
-      leader_id: Node.self(),
+      role: :follower,
+      leader_id: nil,
       current_term: persisted_meta.current_term,
       voted_for: persisted_meta.voted_for,
       log: log,
@@ -77,9 +79,12 @@ defmodule DistDb.Raft do
       commit_index: 0,
       last_applied: 0,
       apply_fun: apply_fun,
-      peers: peers
+      peers: peers,
+      votes_received: 0,
+      election_timeout_ref: nil
     }
 
+    state = reset_election_timeout(state)
     {:ok, state}
   end
 
@@ -96,7 +101,28 @@ defmodule DistDb.Raft do
       "[#{inspect(Node.self())}] received RequestVote from #{inspect(rpc.candidate_id)} in term #{rpc.term}"
     )
 
-    # Voting logic will be implemented in the next step.
+    state = maybe_step_down(state, rpc.term)
+
+    state =
+      if rpc.term < state.current_term do
+        send_request_vote_response(state, rpc.candidate_id, false)
+        state
+      else
+        can_vote = state.voted_for in [nil, rpc.candidate_id]
+        up_to_date = candidate_log_up_to_date?(rpc, state)
+
+        if can_vote and up_to_date do
+          state1 = %{state | voted_for: rpc.candidate_id}
+          persist_meta(state1)
+          state2 = reset_election_timeout(state1)
+          send_request_vote_response(state2, rpc.candidate_id, true)
+          state2
+        else
+          send_request_vote_response(state, rpc.candidate_id, false)
+          state
+        end
+      end
+
     {:noreply, state}
   end
 
@@ -107,6 +133,42 @@ defmodule DistDb.Raft do
     )
 
     # Log replication / heartbeat handling will be implemented in the next step.
+    {:noreply, state}
+  end
+
+  @impl true
+  def handle_cast({:request_vote_response, rpc}, state) do
+    state = maybe_step_down(state, rpc.term)
+
+    state =
+      if state.role == :candidate and rpc.term == state.current_term and rpc.vote_granted do
+        total_nodes = 1 + length(state.peers)
+        majority = div(total_nodes, 2) + 1
+        votes = state.votes_received + 1
+        state1 = %{state | votes_received: votes}
+
+        if votes >= majority do
+          become_leader(state1)
+        else
+          state1
+        end
+      else
+        state
+      end
+
+    {:noreply, state}
+  end
+
+  @impl true
+  def handle_info(:election_timeout, state) do
+    Logger.debug("[#{inspect(Node.self())}] election timeout in role #{state.role}")
+
+    state =
+      case state.role do
+        :leader -> state
+        _ -> start_election(state)
+      end
+
     {:noreply, state}
   end
 
@@ -131,15 +193,75 @@ defmodule DistDb.Raft do
     apply_committed_entries(state)
   end
 
+  defp start_election(state) do
+    Logger.info("[#{inspect(Node.self())}] starting election in term #{state.current_term + 1}")
+
+    state1 = %{
+      state
+      | role: :candidate,
+        current_term: state.current_term + 1,
+        voted_for: state.id,
+        leader_id: nil,
+        votes_received: 1
+    }
+
+    persist_meta(state1)
+    state2 = reset_election_timeout(state1)
+    broadcast_request_vote(state2)
+    state2
+  end
+
+  defp become_follower(state, new_term, leader_id) do
+    state1 = %{
+      state
+      | role: :follower,
+        leader_id: leader_id,
+        current_term: new_term,
+        voted_for: nil,
+        votes_received: 0
+    }
+
+    persist_meta(state1)
+    reset_election_timeout(state1)
+  end
+
+  defp become_leader(state) do
+    Logger.info("[#{inspect(Node.self())}] became leader in term #{state.current_term}")
+
+    state
+    |> cancel_election_timeout()
+    |> Map.put(:role, :leader)
+    |> Map.put(:leader_id, state.id)
+    |> Map.put(:votes_received, 0)
+  end
+
+  defp reset_election_timeout(state) do
+    state = cancel_election_timeout(state)
+
+    timeout = Enum.random(@election_timeout_min..@election_timeout_max)
+    ref = Process.send_after(self(), :election_timeout, timeout)
+    %{state | election_timeout_ref: ref}
+  end
+
+  defp cancel_election_timeout(state) do
+    if state.election_timeout_ref do
+      Process.cancel_timer(state.election_timeout_ref)
+    end
+
+    %{state | election_timeout_ref: nil}
+  end
+
+  defp maybe_step_down(state, rpc_term) do
+    if rpc_term > state.current_term do
+      become_follower(state, rpc_term, nil)
+    else
+      state
+    end
+  end
+
   defp last_log_term(%{log: []}), do: 0
 
   defp last_log_term(%{log: [%{term: term} | _]}), do: term
-
-  defp last_log_term(%{log: log}) do
-    log
-    |> Enum.max_by(& &1.index)
-    |> Map.fetch!(:term)
-  end
 
   defp broadcast_request_vote(state) do
     rpc = %{
@@ -226,12 +348,39 @@ defmodule DistDb.Raft do
 
   defp persist_entry(entry, state) do
     :ok = :dets.insert(@dets_table, {entry.index, entry})
+    persist_meta(state)
+  end
 
+  defp persist_meta(state) do
     meta = %{
       current_term: state.current_term,
       voted_for: state.voted_for
     }
 
     :ok = :dets.insert(@dets_table, {:meta, meta})
+  end
+
+  defp send_request_vote_response(state, candidate_id, granted) do
+    rpc = %{
+      term: state.current_term,
+      vote_granted: granted,
+      voter_id: state.id
+    }
+
+    GenServer.cast({__MODULE__, candidate_id}, {:request_vote_response, rpc})
+  end
+
+  defp candidate_log_up_to_date?(rpc, state) do
+    local_last_term = last_log_term(state)
+
+    if rpc.last_log_term > local_last_term do
+      true
+    else
+      if rpc.last_log_term < local_last_term do
+        false
+      else
+        rpc.last_log_index >= state.last_index
+      end
+    end
   end
 end
