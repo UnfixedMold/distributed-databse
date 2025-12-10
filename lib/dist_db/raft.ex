@@ -21,6 +21,7 @@ defmodule DistDb.Raft do
   @dets_file "raft_log.dets"
   @election_timeout_min 150
   @election_timeout_max 300
+  @heartbeat_interval 75
 
   ## Client API
 
@@ -81,7 +82,8 @@ defmodule DistDb.Raft do
       apply_fun: apply_fun,
       peers: peers,
       votes_received: 0,
-      election_timeout_ref: nil
+      election_timeout_ref: nil,
+      heartbeat_ref: nil
     }
 
     state = reset_election_timeout(state)
@@ -132,7 +134,18 @@ defmodule DistDb.Raft do
       "[#{inspect(Node.self())}] received AppendEntries from #{inspect(rpc.leader_id)} in term #{rpc.term}"
     )
 
-    # Log replication / heartbeat handling will be implemented in the next step.
+    state = maybe_step_down(state, rpc.term)
+
+    state =
+      if rpc.term < state.current_term do
+        state
+      else
+        state
+        |> Map.put(:leader_id, rpc.leader_id)
+        |> Map.put(:role, :follower)
+        |> reset_election_timeout()
+      end
+
     {:noreply, state}
   end
 
@@ -172,7 +185,22 @@ defmodule DistDb.Raft do
     {:noreply, state}
   end
 
-  ## Internal helpers
+  @impl true
+  def handle_info(:heartbeat, state) do
+    state =
+      case state.role do
+        :leader ->
+          broadcast_append_entries(state, [], state.commit_index)
+          schedule_heartbeat(state)
+
+        _other ->
+          cancel_heartbeat(state)
+      end
+
+    {:noreply, state}
+  end
+
+  ## Log helpers
 
   defp append_entry(command, state) do
     index = state.last_index + 1
@@ -192,6 +220,49 @@ defmodule DistDb.Raft do
     state = %{state | commit_index: max(state.commit_index, target_index)}
     apply_committed_entries(state)
   end
+
+  defp apply_committed_entries(state) do
+    entries_by_index =
+      state.log
+      |> Enum.map(&{&1.index, &1})
+      |> Map.new()
+
+    apply_from = state.last_applied + 1
+
+    {last_applied, last_reply} =
+      Enum.reduce(apply_from..state.commit_index, {state.last_applied, nil}, fn
+        idx, {_last_idx, _last_reply} ->
+          case Map.fetch(entries_by_index, idx) do
+            {:ok, %{command: command}} ->
+              reply = state.apply_fun.(command)
+              {idx, reply}
+
+            :error ->
+              {idx, nil}
+          end
+      end)
+
+    {%{state | last_applied: last_applied}, last_reply}
+  end
+
+  defp last_log_term(%{log: []}), do: 0
+  defp last_log_term(%{log: [%{term: term} | _]}), do: term
+
+  defp candidate_log_up_to_date?(rpc, state) do
+    local_last_term = last_log_term(state)
+
+    if rpc.last_log_term > local_last_term do
+      true
+    else
+      if rpc.last_log_term < local_last_term do
+        false
+      else
+        rpc.last_log_index >= state.last_index
+      end
+    end
+  end
+
+  ## Election and role helpers
 
   defp start_election(state) do
     Logger.info("[#{inspect(Node.self())}] starting election in term #{state.current_term + 1}")
@@ -230,9 +301,11 @@ defmodule DistDb.Raft do
 
     state
     |> cancel_election_timeout()
+    |> cancel_heartbeat()
     |> Map.put(:role, :leader)
     |> Map.put(:leader_id, state.id)
     |> Map.put(:votes_received, 0)
+    |> schedule_heartbeat()
   end
 
   defp reset_election_timeout(state) do
@@ -251,6 +324,19 @@ defmodule DistDb.Raft do
     %{state | election_timeout_ref: nil}
   end
 
+  defp schedule_heartbeat(state) do
+    ref = Process.send_after(self(), :heartbeat, @heartbeat_interval)
+    %{state | heartbeat_ref: ref}
+  end
+
+  defp cancel_heartbeat(state) do
+    if state.heartbeat_ref do
+      Process.cancel_timer(state.heartbeat_ref)
+    end
+
+    %{state | heartbeat_ref: nil}
+  end
+
   defp maybe_step_down(state, rpc_term) do
     if rpc_term > state.current_term do
       become_follower(state, rpc_term, nil)
@@ -259,9 +345,7 @@ defmodule DistDb.Raft do
     end
   end
 
-  defp last_log_term(%{log: []}), do: 0
-
-  defp last_log_term(%{log: [%{term: term} | _]}), do: term
+  ## RPC helpers
 
   defp broadcast_request_vote(state) do
     rpc = %{
@@ -291,37 +375,13 @@ defmodule DistDb.Raft do
     end)
   end
 
-  defp apply_committed_entries(state) do
-    entries_by_index =
-      state.log
-      |> Enum.map(&{&1.index, &1})
-      |> Map.new()
-
-    apply_from = state.last_applied + 1
-
-    {last_applied, last_reply} =
-      Enum.reduce(apply_from..state.commit_index, {state.last_applied, nil}, fn
-        idx, {_last_idx, _last_reply} ->
-          case Map.fetch(entries_by_index, idx) do
-            {:ok, %{command: command}} ->
-              reply = state.apply_fun.(command)
-              {idx, reply}
-
-            :error ->
-              {idx, nil}
-          end
-      end)
-
-    {%{state | last_applied: last_applied}, last_reply}
-  end
-
   @impl true
   def terminate(_reason, _state) do
     :dets.close(@dets_table)
     :ok
   end
 
-  ## DETS helpers
+  ## Persistence (DETS) helpers
 
   defp load_persistent_state do
     meta =
@@ -368,19 +428,5 @@ defmodule DistDb.Raft do
     }
 
     GenServer.cast({__MODULE__, candidate_id}, {:request_vote_response, rpc})
-  end
-
-  defp candidate_log_up_to_date?(rpc, state) do
-    local_last_term = last_log_term(state)
-
-    if rpc.last_log_term > local_last_term do
-      true
-    else
-      if rpc.last_log_term < local_last_term do
-        false
-      else
-        rpc.last_log_index >= state.last_index
-      end
-    end
   end
 end
