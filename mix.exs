@@ -8,7 +8,8 @@ defmodule DistDb.MixProject do
       elixir: "~> 1.18",
       elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
-      deps: deps()
+      deps: deps(),
+      aliases: aliases()
     ]
   end
 
@@ -24,6 +25,12 @@ defmodule DistDb.MixProject do
   defp deps do
     [
       {:local_cluster, "~> 2.0", only: [:dev, :test]}
+    ]
+  end
+
+  defp aliases do
+    [
+      test: ["test --no-start"]
     ]
   end
 
