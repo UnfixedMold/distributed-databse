@@ -11,8 +11,8 @@ defmodule DistDb do
       # Basic operations
       DistDb.Store.put("key", "value")
       DistDb.Store.get("key")
+      DistDb.Store.get()     # returns the full map
       DistDb.Store.delete("key")
-      DistDb.Store.list_all()
 
   ## Architecture
 

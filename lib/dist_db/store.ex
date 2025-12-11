@@ -33,8 +33,9 @@ defmodule DistDb.Store do
 
   @doc """
   Gets the value associated with a key.
-  Returns nil if key doesn't exist.
+  Returns nil if key doesn't exist. With no argument, returns the entire map.
   """
+  def get, do: GenServer.call(__MODULE__, :get_all)
   def get(key) do
     GenServer.call(__MODULE__, {:get, key})
   end
@@ -69,6 +70,21 @@ defmodule DistDb.Store do
     Logger.info("Starting DistDb.Store on node #{Node.self()}")
     _dets_file = DistDb.Storage.open_node_dets(@dets_table, @dets_file)
     {:ok, %{}}
+  end
+
+  @impl true
+  def handle_call(:get_all, _from, state) do
+    all =
+      :dets.foldl(
+        fn
+          {k, v}, acc -> Map.put(acc, k, v)
+          _, acc -> acc
+        end,
+        %{},
+        @dets_table
+      )
+
+    {:reply, all, state}
   end
 
   @impl true

@@ -131,14 +131,15 @@ Node.list()  # Should show other nodes automatically
 # Put a key-value pair (creates or updates)
 DistDb.Store.put("name", "alice")
 
-# Get a value
+# Get a value (or the whole map with no args)
 DistDb.Store.get("name")  # => "alice"
+DistDb.Store.get()        # => %{...}  (no arg returns the whole state)
 
 # Delete a key
 DistDb.Store.delete("name")
 
-# List all data
-DistDb.Store.list_all()  # => %{...}
+# Inspect Raft roles for debugging
+DistDb.Raft.roles()  # => %{leaders: [...], followers: [...], candidates: [...]}
 ```
 
 ## Testing

@@ -48,6 +48,26 @@ defmodule DistDb.Raft do
     GenServer.call(__MODULE__, {:propose, command})
   end
 
+  @doc """
+  Groups cluster nodes by their reported role.
+
+  Returns `%{leaders: [...], followers: [...], candidates: [...]}`.
+  """
+  def roles do
+    ([Node.self() | Node.list()])
+    |> Enum.uniq()
+    |> Enum.reduce(%{leaders: [], followers: [], candidates: []}, fn node, acc ->
+      case rpc_role(node) do
+        %{role: :leader} -> Map.update!(acc, :leaders, &[node | &1])
+        %{role: :follower} -> Map.update!(acc, :followers, &[node | &1])
+        %{role: :candidate} -> Map.update!(acc, :candidates, &[node | &1])
+        _ -> acc
+      end
+    end)
+    |> Enum.map(fn {k, v} -> {k, Enum.reverse(v)} end)
+    |> Map.new()
+  end
+
   ## Server callbacks
 
   @impl true
@@ -97,6 +117,17 @@ defmodule DistDb.Raft do
   end
 
   @impl true
+  def handle_call(:role_snapshot, _from, state) do
+    snapshot = %{
+      role: state.role,
+      leader_id: state.leader_id,
+      current_term: state.current_term
+    }
+
+    {:reply, snapshot, state}
+  end
+
+  @impl true
   def handle_call({:propose, command}, _from, state) do
     case state.role do
       :leader ->
@@ -127,7 +158,11 @@ defmodule DistDb.Raft do
           persist_meta(state1)
           state2 = reset_election_timeout(state1)
           send_request_vote_response(state2, rpc.candidate_id, true)
-          Logger.info("[#{inspect(Node.self())}] granted vote for #{inspect(rpc.candidate_id)} in term #{rpc.term}")
+
+          Logger.info(
+            "[#{inspect(Node.self())}] granted vote for #{inspect(rpc.candidate_id)} in term #{rpc.term}"
+          )
+
           state2
         else
           send_request_vote_response(state, rpc.candidate_id, false)
@@ -635,5 +670,16 @@ defmodule DistDb.Raft do
   def terminate(_reason, _state) do
     :dets.close(@dets_table)
     :ok
+  end
+
+  defp rpc_role(node) do
+    if node == Node.self() do
+      GenServer.call(__MODULE__, :role_snapshot)
+    else
+      case :rpc.call(node, GenServer, :call, [__MODULE__, :role_snapshot]) do
+        {:badrpc, reason} -> {:error, reason}
+        snapshot -> snapshot
+      end
+    end
   end
 end
