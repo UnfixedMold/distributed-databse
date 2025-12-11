@@ -65,10 +65,6 @@ defmodule DistDb.Raft do
         [] -> 0
       end
 
-    peers =
-      Node.list()
-      |> Enum.reject(&(&1 == Node.self()))
-
     commit_index = Map.get(persisted_meta, :commit_index, 0)
 
     state = %{
@@ -82,7 +78,7 @@ defmodule DistDb.Raft do
       commit_index: commit_index,
       last_applied: commit_index,
       apply_fun: apply_fun,
-      peers: peers,
+      peers: [],
       next_index: %{},
       match_index: %{},
       votes_received: 0,
@@ -91,7 +87,7 @@ defmodule DistDb.Raft do
     }
 
     state =
-      if peers == [] do
+      if peers() == [] do
         become_leader(state)
       else
         reset_election_timeout(state)
@@ -168,7 +164,7 @@ defmodule DistDb.Raft do
 
     state =
       if state.role == :candidate and rpc.term == state.current_term and rpc.vote_granted do
-        total_nodes = 1 + length(state.peers)
+        total_nodes = 1 + length(peers())
         majority = div(total_nodes, 2) + 1
         votes = state.votes_received + 1
         state1 = %{state | votes_received: votes}
@@ -215,7 +211,7 @@ defmodule DistDb.Raft do
     state =
       case state.role do
         :leader ->
-          Enum.each(state.peers, fn peer ->
+          Enum.each(peers(), fn peer ->
             send_append_entries_to_peer(peer, state)
           end)
 
@@ -265,7 +261,7 @@ defmodule DistDb.Raft do
   end
 
   defp compute_leader_commit_index(state) do
-    total_nodes = 1 + length(state.peers)
+    total_nodes = 1 + length(peers())
     majority = div(total_nodes, 2) + 1
 
     candidate_indices =
@@ -278,7 +274,7 @@ defmodule DistDb.Raft do
     Enum.reduce(candidate_indices, state.commit_index, fn index, acc ->
       count =
         1 +
-          Enum.count(state.peers, fn peer ->
+          Enum.count(peers(), fn peer ->
             Map.get(state.match_index, peer, 0) >= index
           end)
 
@@ -291,7 +287,7 @@ defmodule DistDb.Raft do
   end
 
   defp replicate_entry_to_followers(state) do
-    Enum.each(state.peers, fn peer ->
+    Enum.each(peers(), fn peer ->
       send_append_entries_to_peer(peer, state)
     end)
 
@@ -315,27 +311,32 @@ defmodule DistDb.Raft do
   end
 
   defp apply_committed_entries(state) do
-    entries_by_index =
-      state.log
-      |> Enum.map(&{&1.index, &1})
-      |> Map.new()
+    if state.commit_index == state.last_applied do
+      # Nothing new to apply
+      {state, nil}
+    else
+      entries_by_index =
+        state.log
+        |> Enum.map(&{&1.index, &1})
+        |> Map.new()
 
-    apply_from = state.last_applied + 1
+      apply_from = state.last_applied + 1
 
-    {last_applied, last_reply} =
-      Enum.reduce(apply_from..state.commit_index, {state.last_applied, nil}, fn
-        idx, {_last_idx, _last_reply} ->
-          case Map.fetch(entries_by_index, idx) do
-            {:ok, %{command: command}} ->
-              reply = state.apply_fun.(command)
-              {idx, reply}
+      {last_applied, last_reply} =
+        Enum.reduce(apply_from..state.commit_index, {state.last_applied, nil}, fn
+          idx, {_last_idx, _last_reply} ->
+            case Map.fetch(entries_by_index, idx) do
+              {:ok, %{command: command}} ->
+                reply = state.apply_fun.(command)
+                {idx, reply}
 
-            :error ->
-              {idx, nil}
-          end
-      end)
+              :error ->
+                {idx, nil}
+            end
+        end)
 
-    {%{state | last_applied: last_applied}, last_reply}
+      {%{state | last_applied: last_applied}, last_reply}
+    end
   end
 
   defp last_log_term(%{log: []}), do: 0
@@ -424,12 +425,12 @@ defmodule DistDb.Raft do
     last_index = state.last_index
 
     next_index =
-      state.peers
+      peers()
       |> Enum.map(&{&1, last_index + 1})
       |> Map.new()
 
     match_index =
-      state.peers
+      peers()
       |> Enum.map(&{&1, 0})
       |> Map.new()
 
@@ -507,7 +508,7 @@ defmodule DistDb.Raft do
       last_log_term: last_log_term(state)
     }
 
-    Enum.each(state.peers, fn peer ->
+    Enum.each(peers(), fn peer ->
       GenServer.cast({__MODULE__, peer}, {:request_vote, rpc})
     end)
   end
@@ -549,6 +550,11 @@ defmodule DistDb.Raft do
     }
 
     GenServer.cast({__MODULE__, leader_id}, {:append_entries_response, rpc})
+  end
+
+  defp peers do
+    Node.list()
+    |> Enum.reject(&(&1 == Node.self()))
   end
 
   defp handle_append_entries_ack(rpc, state) do
