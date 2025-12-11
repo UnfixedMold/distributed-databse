@@ -1,8 +1,6 @@
 defmodule DistDb.TestSupport do
   @moduledoc false
 
-  import ExUnit.Assertions
-
   def eventually(fun, attempts \\ 50, delay \\ 20)
 
   def eventually(fun, attempts, _delay) when attempts <= 0 do
@@ -19,30 +17,18 @@ defmodule DistDb.TestSupport do
     end
   end
 
-  def start_cluster(node_count) do
-    {:ok, cluster} = LocalCluster.start_link(node_count, applications: [:dist_db])
+  def start_cluster(count) do
+    {:ok, cluster} = LocalCluster.start_link(count)
     {:ok, nodes} = LocalCluster.nodes(cluster)
+
+    Enum.each(nodes, fn n ->
+      :rpc.call(n, Application, :ensure_all_started, [:dist_db])
+    end)
+
     {cluster, nodes}
   end
 
   def stop_cluster(cluster) do
-    try do
-      LocalCluster.stop(cluster)
-    catch
-      :exit, {:noproc, _} -> :ok
-      :exit, {:shutdown, _} -> :ok
-      :exit, _ -> :ok
-    end
-  end
-
-  def wait_until_connected(nodes) do
-    Enum.each(nodes, fn node ->
-      others = List.delete(nodes, node)
-
-      eventually(fn ->
-        listed = :rpc.call(node, Node, :list, [])
-        Enum.each(others, fn other -> assert other in listed end)
-      end)
-    end)
+    LocalCluster.stop(cluster)
   end
 end

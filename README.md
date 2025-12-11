@@ -116,15 +116,6 @@ receive(READY(m), from):
       deliver(m)
 ```
 
-### Connecting Nodes
-
-Nodes automatically discover and connect to each other using `libcluster`:
-
-```elixir
-# Verify connections
-Node.list()  # Should show other nodes automatically
-```
-
 ### Basic Operations
 
 ```elixir

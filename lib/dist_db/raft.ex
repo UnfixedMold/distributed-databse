@@ -51,13 +51,11 @@ defmodule DistDb.Raft do
   @doc """
   Groups cluster nodes by their reported role.
 
-  Returns `%{nodes: [...], leaders: [...], followers: [...], candidates: [...]}`.
+  Returns `%{leaders: [...], followers: [...], candidates: [...]}`.
   """
   def roles do
-    nodes = ([Node.self() | Node.list()]) |> Enum.uniq()
-
     role_buckets =
-      Enum.reduce(nodes, %{leaders: [], followers: [], candidates: []}, fn node, acc ->
+      Enum.reduce([Node.self() | Node.list()], %{leaders: [], followers: [], candidates: []}, fn node, acc ->
         case rpc_role(node) do
           %{role: :leader} -> Map.update!(acc, :leaders, &[node | &1])
           %{role: :follower} -> Map.update!(acc, :followers, &[node | &1])
@@ -70,8 +68,7 @@ defmodule DistDb.Raft do
       role_buckets
       |> Enum.map(fn {k, v} -> {k, Enum.reverse(v)} end)
       |> Map.new()
-
-    Map.put(buckets, :nodes, nodes)
+    buckets
   end
 
   ## Server callbacks

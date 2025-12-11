@@ -23,8 +23,7 @@ defmodule DistDb.MixProject do
   # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
-      {:local_cluster, "~> 2.0", only: [:dev, :test]},
-      {:libcluster, "~> 3.4"}
+      {:local_cluster, "~> 2.0", only: [:dev, :test]}
     ]
   end
 

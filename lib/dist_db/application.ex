@@ -2,7 +2,7 @@ defmodule DistDb.Application do
   @moduledoc """
   The DistDb Application supervisor.
 
-  Starts the Raft and Store processes plus clustering when the application boots.
+  Starts the Raft and Store processes.
   """
 
   use Application
@@ -12,12 +12,7 @@ defmodule DistDb.Application do
   def start(_type, _args) do
     Logger.info("Starting DistDb application on node #{Node.self()}")
 
-    topologies = [
-      gossip: [strategy: Cluster.Strategy.Gossip]
-    ]
-
     children = [
-      {Cluster.Supervisor, [topologies, [name: DistDb.ClusterSupervisor]]},
       {DistDb.Store, []},
       {DistDb.Raft, [apply_fun: &DistDb.Store.apply/1]}
     ]
