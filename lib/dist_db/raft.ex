@@ -51,21 +51,27 @@ defmodule DistDb.Raft do
   @doc """
   Groups cluster nodes by their reported role.
 
-  Returns `%{leaders: [...], followers: [...], candidates: [...]}`.
+  Returns `%{nodes: [...], leaders: [...], followers: [...], candidates: [...]}`.
   """
   def roles do
-    ([Node.self() | Node.list()])
-    |> Enum.uniq()
-    |> Enum.reduce(%{leaders: [], followers: [], candidates: []}, fn node, acc ->
-      case rpc_role(node) do
-        %{role: :leader} -> Map.update!(acc, :leaders, &[node | &1])
-        %{role: :follower} -> Map.update!(acc, :followers, &[node | &1])
-        %{role: :candidate} -> Map.update!(acc, :candidates, &[node | &1])
-        _ -> acc
-      end
-    end)
-    |> Enum.map(fn {k, v} -> {k, Enum.reverse(v)} end)
-    |> Map.new()
+    nodes = ([Node.self() | Node.list()]) |> Enum.uniq()
+
+    role_buckets =
+      Enum.reduce(nodes, %{leaders: [], followers: [], candidates: []}, fn node, acc ->
+        case rpc_role(node) do
+          %{role: :leader} -> Map.update!(acc, :leaders, &[node | &1])
+          %{role: :follower} -> Map.update!(acc, :followers, &[node | &1])
+          %{role: :candidate} -> Map.update!(acc, :candidates, &[node | &1])
+          _ -> acc
+        end
+      end)
+
+    buckets =
+      role_buckets
+      |> Enum.map(fn {k, v} -> {k, Enum.reverse(v)} end)
+      |> Map.new()
+
+    Map.put(buckets, :nodes, nodes)
   end
 
   ## Server callbacks
