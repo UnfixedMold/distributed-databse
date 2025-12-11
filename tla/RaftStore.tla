@@ -2,30 +2,40 @@
 \* Raft-style replication model aligned to our application (leader/follower, log, store).
 EXTENDS Naturals, FiniteSets, Sequences
 
-CONSTANTS Nodes, Keys, Values
+CONSTANTS Nodes, Keys, Values, MaxTerm, MaxIndex
 
 ASSUME Cardinality(Nodes) >= 3
 
 Roles == {"leader", "follower", "candidate"}
-OpPut == "put"
+Ops == {"put"}
 Cmd(op, key, val) == [op |-> op, key |-> key, val |-> val]
 Entry(term, cmd) == [term |-> term, cmd |-> cmd]
+
+Max2(a, b) == IF a >= b THEN a ELSE b
+Min2(a, b) == IF a <= b THEN a ELSE b
+
+TermDom == 0..MaxTerm
+IndexDom == 0..MaxIndex
+NextIdxDom == 0..(MaxIndex + 1)
+
+EntryRec == [term: TermDom, cmd: [op: Ops, key: Keys, val: Values]]
+EntrySeq == { s \in Seq(EntryRec) : Len(s) <= MaxIndex }
 
 RPCType ==
   {"rv", "rvResp", "ae", "aeResp"}
 
 Message ==
   [ mtype: RPCType,
-    term: Nat,
+    term: TermDom,
     from: Nodes,
     to: Nodes,
-    lastLogIndex: Nat,
-    lastLogTerm: Nat,
+    lastLogIndex: IndexDom,
+    lastLogTerm: TermDom,
     voteGranted: BOOLEAN,
-    entries: Seq([term: Nat, cmd: [op: Str, key: Keys, val: Values]]),
-    prevLogIndex: Nat,
-    prevLogTerm: Nat,
-    leaderCommit: Nat,
+    entries: EntrySeq,
+    prevLogIndex: IndexDom,
+    prevLogTerm: TermDom,
+    leaderCommit: IndexDom,
     success: BOOLEAN ]
 
 NoValue == "empty"
@@ -90,148 +100,134 @@ RequestVoteHandle ==
   \E msg \in messages :
     /\ msg.mtype = "rv"
     /\ LET voter == msg.to IN
-         IF msg.term < term[voter] THEN
-           /\ messages' = messages \ {msg}
-           /\ UNCHANGED <<term, role, votedFor, log, commitIndex, lastApplied, store, nextIndex, matchIndex>>
-         ELSE
-           /\ term' = [term EXCEPT ![voter] = Max(term[voter], msg.term)]
-           /\ canVote = (votedFor[voter] = NULL) \/ (votedFor[voter] = msg.from)
-           /\ upToDate = UpToDate(msg.from, voter)
-           /\ grant = canVote /\ upToDate
-           /\ votedFor' =
-                 IF grant
-                   THEN [votedFor EXCEPT ![voter] = msg.from]
-                   ELSE votedFor
-           /\ messages' =
-                 (messages \ {msg})
-                 \cup {
-                   [ mtype |-> "rvResp",
-                     term |-> term'[voter],
-                     from |-> voter,
-                     to |-> msg.from,
-                     voteGranted |-> grant,
-                     lastLogIndex |-> LastLogIndex(log[voter]),
-                     lastLogTerm |-> LastLogTerm(log[voter]),
-                     entries |-> <<>>,
-                     prevLogIndex |-> 0, prevLogTerm |-> 0,
-                     leaderCommit |-> commitIndex[voter],
-                     success |-> FALSE ]
-                 }
-           /\ UNCHANGED <<role, log, commitIndex, lastApplied, store, nextIndex, matchIndex>>
+       LET cand == msg.from IN
+         /\ role[cand] = "candidate"
+         /\ IF msg.term < term[voter] THEN
+               /\ messages' = messages \ {msg}
+               /\ UNCHANGED <<term, role, votedFor, log, commitIndex, lastApplied, store, nextIndex, matchIndex>>
+            ELSE
+               /\ term' = [term EXCEPT ![voter] = Max2(term[voter], msg.term)]
+               /\ LET canVote == (votedFor[voter] = NULL) \/ (votedFor[voter] = cand) IN
+                  LET upToDate == UpToDate(cand, voter) IN
+                  LET grant == canVote /\ upToDate IN
+                    /\ votedFor' =
+                          IF grant
+                            THEN [votedFor EXCEPT ![voter] = cand]
+                            ELSE votedFor
+                    /\ messages' =
+                          (messages \ {msg})
+                          \cup {
+                            [ mtype |-> "rvResp",
+                              term |-> term'[voter],
+                              from |-> voter,
+                              to |-> cand,
+                              voteGranted |-> grant,
+                              lastLogIndex |-> LastLogIndex(log[voter]),
+                              lastLogTerm |-> LastLogTerm(log[voter]),
+                              entries |-> <<>>,
+                              prevLogIndex |-> 0,
+                              prevLogTerm |-> 0,
+                              leaderCommit |-> commitIndex[voter],
+                              success |-> FALSE ]
+                          }
+                    /\ UNCHANGED <<role, log, commitIndex, lastApplied, store, nextIndex, matchIndex>>
 
 AppendEntriesSend ==
   \E leader \in Nodes :
     /\ role[leader] = "leader"
     /\ \E follower \in Nodes \ {leader} :
-        /\ let ni == nextIndex[leader][follower] in
-           let prevIdx == ni - 1 in
-           let prevTerm == LogTerm(log[leader], prevIdx) in
-           let entriesToSend ==
-                 SubSeq(log[leader], ni, Len(log[leader])) in
-           /\ messages' =
-                messages \cup {
-                  [ mtype |-> "ae",
-                    term |-> term[leader],
-                    from |-> leader,
-                    to |-> follower,
-                    prevLogIndex |-> prevIdx,
-                    prevLogTerm |-> prevTerm,
-                    entries |-> entriesToSend,
-                    leaderCommit |-> commitIndex[leader],
-                    lastLogIndex |-> LastLogIndex(log[leader]),
-                    lastLogTerm |-> LastLogTerm(log[leader]),
-                    voteGranted |-> FALSE,
-                    success |-> FALSE ]
-                }
+        /\ LET nextIdx == nextIndex[leader][follower] IN
+           LET prevIdx == nextIdx - 1 IN
+           LET prevTerm == LogTerm(log[leader], prevIdx) IN
+           LET entriesToSend == SubSeq(log[leader], nextIdx, Len(log[leader])) IN
+             /\ messages' =
+                  messages \cup {
+                    [ mtype |-> "ae",
+                      term |-> term[leader],
+                      from |-> leader,
+                      to |-> follower,
+                      prevLogIndex |-> prevIdx,
+                      prevLogTerm |-> prevTerm,
+                      entries |-> entriesToSend,
+                      leaderCommit |-> commitIndex[leader],
+                      lastLogIndex |-> LastLogIndex(log[leader]),
+                      lastLogTerm |-> LastLogTerm(log[leader]),
+                      voteGranted |-> FALSE,
+                      success |-> FALSE ]
+                  }
         /\ UNCHANGED <<term, role, votedFor, log, commitIndex, lastApplied, store, nextIndex, matchIndex>>
 
 AppendEntriesHandle ==
   \E msg \in messages :
     /\ msg.mtype = "ae"
-    /\ let node == msg.to in
-       /\ term' = term
-       /\ role' = role
-       /\ votedFor' = votedFor
-       /\ store' = store
-       /\ IF msg.term < term[node] THEN
-             /\ messages' = messages \ {msg}
-             /\ log' = log
-             /\ commitIndex' = commitIndex
-             /\ lastApplied' = lastApplied
-             /\ nextIndex' = nextIndex
-             /\ matchIndex' = matchIndex
-          ELSE
-             /\ term1 = [term EXCEPT ![node] = Max(term[node], msg.term)]
-             /\ okPrev ==
-                  (msg.prevLogIndex = 0)
-                  \/ (msg.prevLogIndex <= Len(log[node])
-                      /\ LogTerm(log[node], msg.prevLogIndex) = msg.prevLogTerm)
-             /\ IF ~okPrev THEN
-                   /\ log' = log
-                   /\ commitIndex' = commitIndex
-                   /\ lastApplied' = lastApplied
-                   /\ nextIndex' = nextIndex
-                   /\ matchIndex' = matchIndex
-                   /\ messages' =
-                        (messages \ {msg})
-                        \cup {
-                          [mtype |-> "aeResp", term |-> term1[node],
-                           from |-> node, to |-> msg.from,
-                           success |-> FALSE,
-                           prevLogIndex |-> msg.prevLogIndex,
-                           prevLogTerm |-> msg.prevLogTerm,
-                           entries |-> <<>>,
-                           leaderCommit |-> commitIndex[node],
-                           lastLogIndex |-> Len(log[node]),
-                           lastLogTerm |-> LogTerm(log[node], Len(log[node])),
-                           voteGranted |-> FALSE]
-                        }
-                   /\ term' = term1
-                ELSE
-                   /\ newLog =
-                        IF msg.entries = <<>>
-                          THEN log[node]
-                          ELSE
-                            LET truncated ==
-                                  SubSeq(log[node], 1, msg.prevLogIndex) IN
-                            truncated \o msg.entries
-                   /\ log' = [log EXCEPT ![node] = newLog]
-                   /\ newCommit =
-                        IF msg.leaderCommit > commitIndex[node]
-                          THEN Min(msg.leaderCommit, Len(newLog))
-                          ELSE commitIndex[node]
-                   /\ commitIndex' = [commitIndex EXCEPT ![node] = newCommit]
-                   /\ lastApplied' = lastApplied
-                   /\ nextIndex' = nextIndex
-                   /\ matchIndex' = matchIndex
-                   /\ messages' =
-                        (messages \ {msg})
-                        \cup {
-                          [mtype |-> "aeResp", term |-> term1[node],
-                           from |-> node, to |-> msg.from,
-                           success |-> TRUE,
-                           prevLogIndex |-> msg.prevLogIndex,
-                           prevLogTerm |-> msg.prevLogTerm,
-                           entries |-> <<>>,
-                           leaderCommit |-> newCommit,
-                           lastLogIndex |-> Len(newLog),
-                           lastLogTerm |-> LogTerm(newLog, Len(newLog)),
-                           voteGranted |-> FALSE]
-                        }
-                   /\ term' = term1
+    /\ LET node == msg.to IN
+       LET term1 == [term EXCEPT ![node] = Max2(term[node], msg.term)] IN
+       LET okPrev ==
+            (msg.prevLogIndex = 0)
+            \/ (msg.prevLogIndex <= Len(log[node])
+                /\ LogTerm(log[node], msg.prevLogIndex) = msg.prevLogTerm) IN
+         /\ term' = term
+         /\ role' = role
+         /\ votedFor' = votedFor
+         /\ store' = store
+         /\ IF msg.term < term[node] THEN
+               /\ messages' = messages \ {msg}
+               /\ UNCHANGED <<log, commitIndex, lastApplied, nextIndex, matchIndex>>
+            ELSE
+               /\ IF ~okPrev THEN
+                     /\ UNCHANGED <<log, commitIndex, lastApplied, nextIndex, matchIndex>>
+                     /\ messages' =
+                          (messages \ {msg})
+                          \cup {
+                            [mtype |-> "aeResp", term |-> term1[node],
+                             from |-> node, to |-> msg.from,
+                             success |-> FALSE,
+                             prevLogIndex |-> msg.prevLogIndex,
+                             prevLogTerm |-> msg.prevLogTerm,
+                             entries |-> <<>>,
+                             leaderCommit |-> commitIndex[node],
+                             lastLogIndex |-> Len(log[node]),
+                             lastLogTerm |-> LogTerm(log[node], Len(log[node])),
+                             voteGranted |-> FALSE]
+                          }
+                     /\ term' = term1
+                  ELSE
+                     /\ LET truncated == SubSeq(log[node], 1, msg.prevLogIndex) IN
+                        LET newLog ==
+                              IF msg.entries = <<>>
+                                THEN log[node]
+                                ELSE truncated \o msg.entries IN
+                        LET newCommit ==
+                              IF msg.leaderCommit > commitIndex[node]
+                                THEN Min2(msg.leaderCommit, Len(newLog))
+                                ELSE commitIndex[node] IN
+                          /\ log' = [log EXCEPT ![node] = newLog]
+                          /\ commitIndex' = [commitIndex EXCEPT ![node] = newCommit]
+                          /\ lastApplied' = lastApplied
+                          /\ nextIndex' = nextIndex
+                          /\ matchIndex' = matchIndex
+                          /\ messages' =
+                               (messages \ {msg})
+                               \cup {
+                                 [mtype |-> "aeResp", term |-> term1[node],
+                                  from |-> node, to |-> msg.from,
+                                  success |-> TRUE,
+                                  prevLogIndex |-> msg.prevLogIndex,
+                                  prevLogTerm |-> msg.prevLogTerm,
+                                  entries |-> <<>>,
+                                  leaderCommit |-> newCommit,
+                                  lastLogIndex |-> Len(newLog),
+                                  lastLogTerm |-> LogTerm(newLog, Len(newLog)),
+                                  voteGranted |-> FALSE]
+                               }
+                          /\ term' = term1
 
 AppendEntriesRespHandle ==
   \E msg \in messages :
     /\ msg.mtype = "aeResp"
-    /\ let leader == msg.to in
+    /\ LET leader == msg.to IN
        /\ role[leader] = "leader"
-       /\ term' = term
-       /\ role' = role
-       /\ votedFor' = votedFor
-       /\ store' = store
-       /\ log' = log
-       /\ commitIndex' = commitIndex
-       /\ lastApplied' = lastApplied
+       /\ UNCHANGED <<term, role, votedFor, store, log, commitIndex, lastApplied>>
        /\ IF msg.success THEN
              /\ nextIndex' =
                    [nextIndex EXCEPT ![leader][msg.from] = msg.lastLogIndex + 1]
@@ -239,14 +235,14 @@ AppendEntriesRespHandle ==
                    [matchIndex EXCEPT ![leader][msg.from] = msg.lastLogIndex]
           ELSE
              /\ nextIndex' =
-                   [nextIndex EXCEPT ![leader][msg.from] = Max(1, nextIndex[leader][msg.from] - 1)]
+                   [nextIndex EXCEPT ![leader][msg.from] = Max2(1, nextIndex[leader][msg.from] - 1)]
              /\ matchIndex' = matchIndex
        /\ messages' = messages \ {msg}
 
 AdvanceCommitLeader ==
   \E leader \in Nodes :
     /\ role[leader] = "leader"
-    /\ \E idx \in Nat :
+    /\ \E idx \in IndexDom :
         /\ idx > commitIndex[leader]
         /\ idx <= Len(log[leader])
         /\ log[leader][idx].term = term[leader]
@@ -259,11 +255,11 @@ AdvanceCommitLeader ==
 ApplyCommitted ==
   \E n \in Nodes :
     /\ commitIndex[n] > lastApplied[n]
-    /\ let idx == lastApplied[n] + 1 in
-       let entry == log[n][idx] in
-       /\ store' = [store EXCEPT ![n][entry.cmd.key] = entry.cmd.val]
-       /\ lastApplied' = [lastApplied EXCEPT ![n] = idx]
-       /\ UNCHANGED <<term, role, votedFor, log, commitIndex, nextIndex, matchIndex, messages>>
+    /\ LET idx == lastApplied[n] + 1 IN
+       LET entry == log[n][idx] IN
+         /\ store' = [store EXCEPT ![n][entry.cmd.key] = entry.cmd.val]
+         /\ lastApplied' = [lastApplied EXCEPT ![n] = idx]
+         /\ UNCHANGED <<term, role, votedFor, log, commitIndex, nextIndex, matchIndex, messages>>
 
 Crash == UNCHANGED vars
 NoOp == UNCHANGED vars
@@ -282,33 +278,21 @@ Next ==
 Spec == Init /\ [][Next]_vars
 
 TypeOK ==
-  /\ term \in [Nodes -> Nat]
+  /\ term \in [Nodes -> TermDom]
   /\ role \in [Nodes -> Roles]
   /\ votedFor \in [Nodes -> (Nodes \cup {NULL})]
-  /\ log \in [Nodes -> Seq([term: Nat, cmd: [op: Str, key: Keys, val: Values]])]
-  /\ commitIndex \in [Nodes -> Nat]
-  /\ lastApplied \in [Nodes -> Nat]
+  /\ log \in [Nodes -> EntrySeq]
+  /\ commitIndex \in [Nodes -> IndexDom]
+  /\ lastApplied \in [Nodes -> IndexDom]
   /\ store \in [Nodes -> [Keys -> Values \cup {NoValue}]]
-  /\ nextIndex \in [Nodes -> [Nodes -> Nat]]
-  /\ matchIndex \in [Nodes -> [Nodes -> Nat]]
+  /\ nextIndex \in [Nodes -> [Nodes -> NextIdxDom]]
+  /\ matchIndex \in [Nodes -> [Nodes -> IndexDom]]
   /\ messages \subseteq Message
 
 LeaderUniqueness ==
-  \A t \in Nat :
+  \A t \in TermDom :
     \A l1, l2 \in Nodes :
       (role[l1] = "leader" /\ role[l2] = "leader" /\ term[l1] = t /\ term[l2] = t)
         => l1 = l2
-
-LogAgreement ==
-  \A n1, n2 \in Nodes :
-    \A i \in Nat :
-      (commitIndex[n1] >= i /\ commitIndex[n2] >= i /\ i > 0)
-        => log[n1][i] = log[n2][i]
-
-StoreConsistency ==
-  \A n1, n2 \in Nodes :
-    \A k \in Keys :
-      (lastApplied[n1] = lastApplied[n2])
-        => store[n1][k] = store[n2][k]
 
 ==== END MODULE RaftStore ====
