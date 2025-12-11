@@ -127,6 +127,7 @@ defmodule DistDb.Raft do
           persist_meta(state1)
           state2 = reset_election_timeout(state1)
           send_request_vote_response(state2, rpc.candidate_id, true)
+          Logger.info("[#{inspect(Node.self())}] granted vote for #{inspect(rpc.candidate_id)} in term #{rpc.term}")
           state2
         else
           send_request_vote_response(state, rpc.candidate_id, false)
@@ -296,12 +297,22 @@ defmodule DistDb.Raft do
 
   defp apply_append_entries(state, rpc) do
     if not prev_log_matches?(state, rpc.prev_log_index, rpc.prev_log_term) do
+      Logger.info(
+        "[#{inspect(Node.self())}] rejected AppendEntries from #{inspect(rpc.leader_id)} in term #{rpc.term} due to log mismatch at index #{rpc.prev_log_index}"
+      )
+
       {state, false}
     else
       state =
         state
         |> truncate_log_after(rpc.prev_log_index)
         |> append_entries(rpc.entries)
+
+      if rpc.entries != [] do
+        Logger.info(
+          "[#{inspect(Node.self())}] appended #{length(rpc.entries)} entries from #{inspect(rpc.leader_id)} up to index #{state.last_index} in term #{rpc.term}"
+        )
+      end
 
       new_commit_index = min(rpc.leader_commit, state.last_index)
       {state, _reply} = advance_commit_index(new_commit_index, state)
