@@ -101,7 +101,6 @@ defmodule DistDb.Raft do
       commit_index: commit_index,
       last_applied: commit_index,
       apply_fun: apply_fun,
-      peers: [],
       next_index: %{},
       match_index: %{},
       votes_received: 0,
