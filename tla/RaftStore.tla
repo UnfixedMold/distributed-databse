@@ -90,34 +90,34 @@ RequestVoteHandle ==
   \E msg \in messages :
     /\ msg.mtype = "rv"
     /\ LET voter == msg.to IN
-       IF msg.term < term[voter] THEN
-         /\ messages' = messages \ {msg}
-         /\ UNCHANGED <<term, role, votedFor, log, commitIndex, lastApplied, store, nextIndex, matchIndex>>
-       ELSE
-         /\ term' = [term EXCEPT ![voter] = Max(term[voter], msg.term)]
-         /\ canVote == (votedFor[voter] = NULL) \/ (votedFor[voter] = msg.from)
-         /\ upToDate == UpToDate(msg.from, voter)
-         /\ grant == canVote /\ upToDate
-         /\ votedFor' =
-               IF grant
-                 THEN [votedFor EXCEPT ![voter] = msg.from]
-                 ELSE votedFor
-         /\ messages' =
-               (messages \ {msg})
-               \cup {
-                 [ mtype |-> "rvResp",
-                   term |-> term'[voter],
-                   from |-> voter,
-                   to |-> msg.from,
-                   voteGranted |-> grant,
-                   lastLogIndex |-> LastLogIndex(log[voter]),
-                   lastLogTerm |-> LastLogTerm(log[voter]),
-                   entries |-> <<>>,
-                   prevLogIndex |-> 0, prevLogTerm |-> 0,
-                   leaderCommit |-> commitIndex[voter],
-                   success |-> FALSE ]
-               }
-         /\ UNCHANGED <<role, log, commitIndex, lastApplied, store, nextIndex, matchIndex>>
+         IF msg.term < term[voter] THEN
+           /\ messages' = messages \ {msg}
+           /\ UNCHANGED <<term, role, votedFor, log, commitIndex, lastApplied, store, nextIndex, matchIndex>>
+         ELSE
+           /\ term' = [term EXCEPT ![voter] = Max(term[voter], msg.term)]
+           /\ canVote = (votedFor[voter] = NULL) \/ (votedFor[voter] = msg.from)
+           /\ upToDate = UpToDate(msg.from, voter)
+           /\ grant = canVote /\ upToDate
+           /\ votedFor' =
+                 IF grant
+                   THEN [votedFor EXCEPT ![voter] = msg.from]
+                   ELSE votedFor
+           /\ messages' =
+                 (messages \ {msg})
+                 \cup {
+                   [ mtype |-> "rvResp",
+                     term |-> term'[voter],
+                     from |-> voter,
+                     to |-> msg.from,
+                     voteGranted |-> grant,
+                     lastLogIndex |-> LastLogIndex(log[voter]),
+                     lastLogTerm |-> LastLogTerm(log[voter]),
+                     entries |-> <<>>,
+                     prevLogIndex |-> 0, prevLogTerm |-> 0,
+                     leaderCommit |-> commitIndex[voter],
+                     success |-> FALSE ]
+                 }
+           /\ UNCHANGED <<role, log, commitIndex, lastApplied, store, nextIndex, matchIndex>>
 
 AppendEntriesSend ==
   \E leader \in Nodes :
